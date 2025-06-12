@@ -7,12 +7,11 @@ def show():
 
     # --- Orders Book Section ---
     st.subheader("Order Book (Open/Partially Filled)")
-    # You might need to change endpoint depending on your API for "open" orders
+    # Your API endpoint may differ, adjust if needed
     data = integrate_get("/orderbook")
     orderlist = data.get("orderBookDetail", [])
     if orderlist:
         for order in orderlist:
-            # Only show orders that are Open or Partially Filled (customize this logic as needed)
             order_status = order.get("status", "").upper()
             if order_status not in ["OPEN", "PARTIALLY FILLED", "PARTIALLY_FILLED"]:
                 continue
@@ -74,7 +73,6 @@ def show():
                                     payload["validity"] = validity
                                 if market_protection:
                                     payload["market_protection"] = str(market_protection)
-                                # source can also be added if you wish
                                 resp = integrate_post("/modify", payload)
                                 st.success("Modify response:")
                                 st.json(resp)
