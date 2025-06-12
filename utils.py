@@ -3,7 +3,6 @@ from integrate import ConnectToIntegrate, IntegrateOrders
 
 @st.cache_resource(show_spinner=False)
 def get_integrate_client():
-    # Only use session keys, do not call login() if they are valid!
     uid = st.secrets["integrate_uid"]
     actid = st.secrets["integrate_actid"]
     api_session_key = st.secrets["integrate_api_session_key"]
