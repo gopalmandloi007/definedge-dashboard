@@ -1,5 +1,5 @@
 import streamlit as st
-from pyintegrate import ConnectToIntegrate, IntegrateOrders
+from integrate import ConnectToIntegrate, IntegrateOrders
 
 @st.cache_resource(show_spinner=False)
 def get_integrate_client():
