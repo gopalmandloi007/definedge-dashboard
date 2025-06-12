@@ -1,8 +1,12 @@
 import streamlit as st
+
+st.set_page_config(page_title="Dashboard", layout="wide")  # Must be first Streamlit call
+
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from utils import integrate_get, integrate_post
+from integrate import ConnectToIntegrate, IntegrateOrders
 
 def get_definedge_ltp_and_yclose(segment, token, session_key, max_days_lookback=10):
     headers = {'Authorization': session_key}
@@ -195,13 +199,12 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
     }
     return df, summary
 
-st.set_page_config(page_title="Dashboard", layout="wide")
+# --- Main App ---
 st.title("Perfect Holdings / Positions (Live LTP & P&L)")
 
 # Holdings
 st.header("Holdings")
 api_session_key = st.secrets["integrate_api_session_key"]
-from integrate import ConnectToIntegrate, IntegrateOrders
 api_token = st.secrets["integrate_api_token"]
 api_secret = st.secrets["integrate_api_secret"]
 uid = st.secrets["integrate_uid"]
