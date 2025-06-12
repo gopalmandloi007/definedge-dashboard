@@ -1,35 +1,49 @@
 import streamlit as st
 import pandas as pd
-from utils import integrate_get
+from utils import integrate_get  # aapka existing function
+
+import requests
+from datetime import datetime, timedelta
+
+def get_ltp(exchange, token, api_session_key):
+    url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{token}"
+    headers = {"Authorization": api_session_key}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        return resp.json().get("ltp", 0)
+    return 0
+
+def get_prev_close(exchange, token, api_session_key):
+    # previous trading day calculate karo
+    to_date = datetime.now()
+    from_date = to_date - timedelta(days=2)  # 2 din peechhe tak le lo, weekends handle karne ke liye
+    from_str = from_date.strftime("%d%m%Y0000")
+    to_str = to_date.strftime("%d%m%Y1530")
+    url = f"https://data.definedgesecurities.com/sds/history/{exchange}/{token}/day/{from_str}/{to_str}"
+    headers = {"Authorization": api_session_key}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        rows = resp.text.strip().split("\n")
+        if len(rows) >= 2:
+            # Last but one row ka close price (previous day ka close)
+            prev_row = rows[-2]
+            prev_close = float(prev_row.split(",")[4])
+            return prev_close
+        elif len(rows) == 1:
+            # Sirf ek row hai (matlab aaj ka hi data hai)
+            prev_close = float(rows[0].split(",")[4])
+            return prev_close
+    return 0
 
 def show():
     st.header("=========== Holdings ===========")
 
+    api_session_key = st.secrets["integrate_api_session_key"]
     data = integrate_get("/holdings")
     holdings = data.get("data", [])
     if not holdings:
         st.info("No holdings found.")
         return
-
-    # Gather all symbol/exchange pairs for quote fetch
-    symbol_exch = []
-    for h in holdings:
-        ts = h.get("tradingsymbol")
-        if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
-            tsym = ts[0].get("tradingsymbol", "N/A")
-            exch = ts[0].get("exchange", "N/A")
-        else:
-            tsym = ts if isinstance(ts, str) else "N/A"
-            exch = h.get("exchange", "NSE")
-        if tsym != "N/A":
-            symbol_exch.append({"tradingsymbol": tsym, "exchange": exch})
-
-    # Fetch all quotes at once (if your API allows)
-    quotes = {}
-    if symbol_exch:
-        quotes_data = integrate_get("/quotes", params={"symbols": symbol_exch})
-        # Example: quotes_data = {"SBIN": {"ltp": 800, "prev_close": 790}, ...}
-        quotes = quotes_data.get("data", {})
 
     rows = []
     total_today_pnl = 0
@@ -38,22 +52,28 @@ def show():
     total_current = 0
 
     for h in holdings:
+        # Extract symbol, exchange, token
         ts = h.get("tradingsymbol")
+        exch = h.get("exchange", "NSE")
+        token = None
+        isin = ""
         if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
             tsym = ts[0].get("tradingsymbol", "N/A")
-            exch = ts[0].get("exchange", "N/A")
+            exch = ts[0].get("exchange", "NSE")
+            token = ts[0].get("token")
             isin = ts[0].get("isin", "")
         else:
             tsym = ts if isinstance(ts, str) else "N/A"
-            exch = h.get("exchange", "NSE")
+            token = h.get("token")
             isin = h.get("isin", "")
-
-        # Use LTP/prev_close from quotes if provided, else fallback
-        ltp = float(quotes.get(tsym, {}).get("ltp", h.get("ltp", 0) or 0))
-        prev_close = float(quotes.get(tsym, {}).get("prev_close", h.get("prev_close", 0) or 0))
 
         avg_buy = float(h.get("avg_buy_price", 0) or 0)
         qty = float(h.get("dp_qty", 0) or 0)
+
+        # Get LTP and Prev Close using new APIs
+        ltp = get_ltp(exch, token, api_session_key) if token else 0
+        prev_close = get_prev_close(exch, token, api_session_key) if token else 0
+
         t1_qty = h.get("t1_qty", 0)
         haircut = h.get("haircut", 0)
         collateral_qty = h.get("collateral_qty", 0)
