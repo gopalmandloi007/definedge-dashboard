@@ -6,13 +6,22 @@ def show():
     st.header("Holdings Book (Live P&L with Prev Close)")
     data = integrate_get("/holdings")
     holdings = data.get("data", [])
+    st.write(holdings)  # Show raw holdings for debug
     if not holdings:
         st.info("No holdings found.")
         return
     rows = []
     for h in holdings:
-        ts = h.get("tradingsymbol", "N/A")
-        exch = h.get("exchange", "NSE")
+        # Symbol extraction robust for both list and string
+        ts = h.get("tradingsymbol", None)
+        if isinstance(ts, list):
+            symbol = ts[0].get("tradingsymbol", "N/A") if ts and isinstance(ts[0], dict) else "N/A"
+            exch = ts[0].get("exchange", "N/A") if ts and isinstance(ts[0], dict) else "N/A"
+            isin = ts[0].get("isin", "")
+        else:
+            symbol = ts if ts else "N/A"
+            exch = h.get("exchange", "NSE")
+            isin = h.get("isin", "")
         qty = float(h.get("dp_qty", 0) or 0)
         avg_buy = float(h.get("avg_buy_price", 0) or 0)
         invested = qty * avg_buy
@@ -24,7 +33,7 @@ def show():
         overall_pnl = (ltp - avg_buy) * qty if avg_buy else 0
         pct_change_avg = ((ltp - avg_buy) / avg_buy * 100) if avg_buy else 0
         rows.append({
-            "Symbol": ts,
+            "Symbol": symbol,
             "Qty": qty,
             "Avg Buy": avg_buy,
             "Invested": invested,
@@ -36,7 +45,7 @@ def show():
             "%Change Avg": pct_change_avg,
             "Current": curr_val,
             "Exchange": exch,
-            "ISIN": h.get("isin", "")
+            "ISIN": isin
         })
     if not rows:
         st.info("No holdings with valid qty.")
