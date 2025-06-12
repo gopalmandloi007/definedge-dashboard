@@ -1,28 +1,8 @@
 import streamlit as st
-
-# Yeh line sabse pehle, baaki kahin bhi dobara nahi!
-st.set_page_config(
-    page_title="Definedge Integrate Dashboard",
-    layout="wide"
-)
-
 import pandas as pd
 from integrate import ConnectToIntegrate, IntegrateOrders
 import requests
 from datetime import datetime, timedelta
-
-# --- Load secrets
-api_token = st.secrets["integrate_api_token"]
-api_secret = st.secrets["integrate_api_secret"]
-uid = st.secrets["integrate_uid"]
-actid = st.secrets["integrate_actid"]
-api_session_key = st.secrets["integrate_api_session_key"]
-ws_session_key = st.secrets["integrate_ws_session_key"]
-
-conn = ConnectToIntegrate()
-conn.login(api_token, api_secret)
-conn.set_session_keys(uid, actid, api_session_key, ws_session_key)
-io = IntegrateOrders(conn)
 
 def get_definedge_ltp_and_yclose(segment, token, session_key, max_days_lookback=10):
     headers = {'Authorization': session_key}
@@ -187,19 +167,31 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
     }
     return df, summary
 
-st.title("Definedge Integrate Dashboard")
-st.header("Holdings")
+def show():
+    # --- Load secrets
+    api_token = st.secrets["integrate_api_token"]
+    api_secret = st.secrets["integrate_api_secret"]
+    uid = st.secrets["integrate_uid"]
+    actid = st.secrets["integrate_actid"]
+    api_session_key = st.secrets["integrate_api_session_key"]
+    ws_session_key = st.secrets["integrate_ws_session_key"]
 
-try:
-    holdings_book = io.holdings()
-    if not holdings_book.get("data"):
-        st.info("No holdings found or API returned: " + str(holdings_book))
-    else:
-        master_mapping = build_master_mapping_from_holdings(holdings_book)
-        df_hold, summary = holdings_tabular(holdings_book, master_mapping, api_session_key)
-        st.write("**Summary**")
-        st.write(summary)
-        st.write(f"**Total NSE Holdings: {len(df_hold)}**")
-        st.dataframe(df_hold)
-except Exception as e:
-    st.error(f"Error loading holdings: {e}")
+    conn = ConnectToIntegrate()
+    conn.login(api_token, api_secret)
+    conn.set_session_keys(uid, actid, api_session_key, ws_session_key)
+    io = IntegrateOrders(conn)
+
+    st.header("Holdings")
+    try:
+        holdings_book = io.holdings()
+        if not holdings_book.get("data"):
+            st.info("No holdings found or API returned: " + str(holdings_book))
+        else:
+            master_mapping = build_master_mapping_from_holdings(holdings_book)
+            df_hold, summary = holdings_tabular(holdings_book, master_mapping, api_session_key)
+            st.write("**Summary**")
+            st.write(summary)
+            st.write(f"**Total NSE Holdings: {len(df_hold)}**")
+            st.dataframe(df_hold)
+    except Exception as e:
+        st.error(f"Failed to get holdings: {e}")
