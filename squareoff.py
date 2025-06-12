@@ -51,7 +51,7 @@ def squareoff_hold_form(holding, qty, tradingsymbols):
         else:
             disclosed_quantity = None
 
-        # Warning/info
+        # User warnings
         if qty_option == "Partial" and squareoff_qty == 1:
             st.warning("⚠ You have selected Partial but quantity is only 1. Please confirm if this is correct.")
         if price_option == "Limit Order" and squareoff_price == round(float(holding.get("avg_buy_price") or 0),2):
@@ -87,3 +87,24 @@ def squareoff_hold_form(holding, qty, tradingsymbols):
             status = resp.get('status') or resp.get('message') or resp
             st.success(f"Order Response: {status}")
             st.json(resp)
+
+def show():
+    st.title("⚡ Definedge Integrate Dashboard")
+    st.subheader("💼 Square Off Positions & Holdings")
+    st.markdown("---")
+    st.header("📦 Holdings")
+    data = integrate_get("/holdings")
+    # st.write("DEBUG holdings API response:", data)  # Uncomment for troubleshooting
+    holdings = data.get("data", [])
+    user_holdings = []
+    for h in holdings:
+        qty = int(float(h.get("dp_qty", 0)))
+        tradingsymbols = h.get("tradingsymbol", [])
+        if qty > 0 and tradingsymbols and isinstance(tradingsymbols, list):
+            user_holdings.append((h, qty, tradingsymbols))
+    if not user_holdings:
+        st.info("No holdings to square off.")
+    else:
+        for holding, qty, tradingsymbols in user_holdings:
+            with st.expander(f"{tradingsymbols[0]['tradingsymbol']} | Qty: {qty}", expanded=False):
+                squareoff_hold_form(holding, qty, tradingsymbols)
