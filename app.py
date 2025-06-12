@@ -15,7 +15,7 @@ PAGES = {
     "Quotes": "quotes",
     "GTT": "gtt",
     "GTT/OCO Manage": "gtt_oco_manage",
-    "Square Off": "squareoff",  # <-- YEH LINE ADD KAREN
+    "Square Off": "squareoff",  # <-- Yeh line add karein
     "Websocket Help": "websocket_help",
 }
 
