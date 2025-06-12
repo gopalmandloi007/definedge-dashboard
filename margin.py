@@ -1,21 +1,18 @@
 import streamlit as st
-from utils import definedge_get, definedge_post
+from utils import integrate_post
 
 def show():
-    st.header("🔢 Margins & Span")
-    st.subheader("Get Margin for Orders")
-    # You can implement basket margin requests here
-
-    st.subheader("Span Calculator")
-    with st.form("span_calc"):
-        positions = st.text_area("Positions JSON (as list)", value='[{}]')
-        submit = st.form_submit_button("Calculate Span")
+    st.header("Basket Margin Calculator")
+    st.write("Calculate required margin for a basket of orders.")
+    with st.form("basket_margin"):
+        basket_str = st.text_area("Basket Orders JSON (list)", value='[{"tradingsymbol":"SBIN-EQ","exchange":"NSE","order_type":"BUY","price":0,"price_type":"MARKET","product_type":"CNC","quantity":1}]')
+        submit = st.form_submit_button("Calculate Margin")
         if submit:
             try:
                 import json
-                pos_list = json.loads(positions)
-                data = {"positions": pos_list}
-                resp = definedge_post("/spancalculator", data)
+                basket = json.loads(basket_str)
+                data = {"basketlists": basket}
+                resp = integrate_post("/margin", data)
                 st.write(resp)
             except Exception as e:
                 st.error(str(e))
