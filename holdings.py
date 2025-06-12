@@ -1,7 +1,17 @@
 import streamlit as st
 
-# MUST be the first Streamlit command
-st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
+# Must be the very first Streamlit command
+st.set_page_config(
+    page_title="Definedge Integrate Dashboard",
+    page_icon=":bar_chart:",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://www.definedge.com/support',
+        'Report a bug': "https://www.definedge.com/bug",
+        'About': "# Definedge Integrate Dashboard\nShows live holdings and square-off actions."
+    }
+)
 
 import pandas as pd
 import requests
@@ -197,6 +207,7 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
     }
     return df, summary
 
+# --- Main App ---
 st.title("Definedge Integrate Dashboard")
 st.header("Holdings")
 
