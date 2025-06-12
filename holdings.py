@@ -87,6 +87,9 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
         "Realized P&L", "%Chg Avg", "Invested", "Current", "Exchange", "ISIN", "T1", "Haircut", "Coll Qty", "Sell Amt", "Trade Qty", "Square Off"
     ]
 
+    # For square off action tracking
+    squareoff_results = {}
+
     for idx, h in enumerate(raw):
         dp_qty = float(h.get("dp_qty", 0) or 0)
         avg_buy_price = float(h.get("avg_buy_price", 0) or 0)
@@ -143,29 +146,29 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
                 total_invested += invested
                 total_current += current
 
-                # Square off option as a Streamlit button
-                squareoff_col = st.button(
-                    f"Square Off {tsym}",
-                    key=f"squareoff_{idx}_{tsym}"
-                )
-
-                # Handle square off logic
-                if squareoff_col:
-                    try:
-                        # CNC Sell
-                        order_data = {
-                            "exchange": exch,
-                            "order_type": "SELL",
-                            "price": 0,
-                            "price_type": "MARKET",
-                            "product_type": "CNC",
-                            "quantity": int(holding_qty),
-                            "tradingsymbol": tsym
-                        }
-                        resp = io.place_order(order_data)
-                        st.success(f"Square off order placed for {tsym}: {resp}")
-                    except Exception as e:
-                        st.error(f"Failed to square off {tsym}: {e}")
+                # Square off button per row
+                col1, col2 = st.columns([10,1])
+                with col2:
+                    squareoff_key = f"squareoff_{idx}_{tsym}"
+                    do_squareoff = st.button("Square Off", key=squareoff_key)
+                    squareoff_results[squareoff_key] = False
+                    if do_squareoff:
+                        try:
+                            # Place a SELL CNC MARKET order for full qty
+                            order_data = {
+                                "exchange": exch,
+                                "order_type": "SELL",
+                                "price": 0,
+                                "price_type": "MARKET",
+                                "product_type": "CNC",
+                                "quantity": int(holding_qty),
+                                "tradingsymbol": tsym
+                            }
+                            resp = io.place_order(order_data)
+                            st.success(f"Square off order placed for {tsym}: {resp}")
+                            squareoff_results[squareoff_key] = True
+                        except Exception as e:
+                            st.error(f"Failed to square off {tsym}: {e}")
 
                 table.append([
                     tsym,
@@ -187,7 +190,7 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
                     collateral_qty,
                     f"{sell_amt:.2f}",
                     int(trade_qty),
-                    "Click Above"
+                    "Click"  # just a placeholder in the table
                 ])
 
     total_today_pnl += total_realized_today
