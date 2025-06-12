@@ -13,6 +13,7 @@ PAGES = {
     "Margin": "margin",
     "Quotes": "quotes",
     "GTT": "gtt",
+    "GTT/OCO Manage": "gtt_oco_manage",   # <-- naya option
     "Websocket Help": "websocket_help",
 }
 
