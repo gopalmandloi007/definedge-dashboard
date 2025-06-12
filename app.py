@@ -1,8 +1,10 @@
 import streamlit as st
+import importlib
 
 st.set_page_config(page_title="Definedge Dashboard", layout="wide")
 st.title("Definedge Dashboard")
 
+# List all page files (without .py extension)
 PAGES = {
     "Holdings / Positions": "holdings",
     "Order Book": "orderbook",
@@ -17,30 +19,16 @@ PAGES = {
 
 page = st.sidebar.radio("Go to", list(PAGES.keys()))
 
-if page == "Holdings / Positions":
-    import holdings
-    holdings.show()
-elif page == "Order Book":
-    import orderbook
-    orderbook.show()
-elif page == "Orders (Manage)":
-    import orders
-    orders.show()
-elif page == "Trade Book":
-    import tradebook
-    tradebook.show()
-elif page == "GTT & OCO":
-    import gtt
-    gtt.show()
-elif page == "Limits / Product Conversion":
-    import limits
-    limits.show()
-elif page == "Margins / Span":
-    import margin
-    margin.show()
-elif page == "Quotes & Security Info":
-    import quotes
-    quotes.show()
-elif page == "WebSocket Live Data":
-    import websocket_help
-    websocket_help.show()
+# Try importing the selected page module
+page_module_name = PAGES[page]
+
+try:
+    page_module = importlib.import_module(page_module_name)
+    if hasattr(page_module, 'show'):
+        page_module.show()
+    else:
+        st.error(f"Module `{page_module_name}` found but missing a `show()` function.")
+except ModuleNotFoundError:
+    st.error(f"Module `{page_module_name}.py` not found. Please create this file in your project directory.")
+except Exception as e:
+    st.error(f"Error loading `{page_module_name}`: {e}")
