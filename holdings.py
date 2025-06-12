@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
-from utils import integrate_get, integrate_get as get_quotes
+from utils import integrate_get
+
+import requests
 
 def get_live_ltp_and_prev_close(exchange, token, session_key):
-    # Try to get LTP and previous close from the /quotes endpoint
-    import requests
     url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{token}"
     headers = {"Authorization": session_key}
     try:
@@ -14,8 +14,8 @@ def get_live_ltp_and_prev_close(exchange, token, session_key):
             ltp = float(data.get('ltp', 0) or 0)
             prev_close = float(data.get('prev_close', 0) or 0)
             return ltp, prev_close
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error fetching quote for {exchange}/{token}: {e}")
     return 0, 0
 
 def show():
@@ -49,7 +49,7 @@ def show():
         avg_buy = float(h.get("avg_buy_price", 0) or 0)
         invested = qty * avg_buy
 
-        # Always get live LTP and prev close for each holding
+        # Always get live LTP and Prev Close for each holding
         ltp, prev_close = get_live_ltp_and_prev_close(exch, token, session_key)
         current = qty * ltp
 
@@ -57,6 +57,9 @@ def show():
         overall_pnl = (ltp - avg_buy) * qty if avg_buy else 0
         pct_chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0
         pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if avg_buy else 0
+
+        # For debug:
+        st.write(f"{tsym}: LTP={ltp}, PrevClose={prev_close}, Qty={qty}, TodayPnL={today_pnl}")
 
         rows.append({
             "Symbol": tsym,
