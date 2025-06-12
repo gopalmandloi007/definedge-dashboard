@@ -1,34 +1,30 @@
 import streamlit as st
 import importlib
 
-st.set_page_config(page_title="Definedge Dashboard", layout="wide")
-st.title("Definedge Dashboard")
+st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
+st.title("Definedge Integrate Dashboard")
 
-# List all page files (without .py extension)
 PAGES = {
-    "Holdings / Positions": "holdings",
+    "Holdings": "holdings",
+    "Positions": "positions",
     "Order Book": "orderbook",
-    "Orders (Manage)": "orders",
-    "Trade Book": "tradebook",
-    "GTT & OCO": "gtt",
-    "Limits / Product Conversion": "limits",
-    "Margins / Span": "margin",
-    "Quotes & Security Info": "quotes",
-    "WebSocket Live Data": "websocket_help",
+    "Orders": "orders",
+    "Limits": "limits",
+    "Margin": "margin",
+    "Quotes": "quotes",
+    "GTT": "gtt",
+    "Websocket Help": "websocket_help",
 }
 
 page = st.sidebar.radio("Go to", list(PAGES.keys()))
-
-# Try importing the selected page module
-page_module_name = PAGES[page]
-
+modulename = PAGES[page]
 try:
-    page_module = importlib.import_module(page_module_name)
-    if hasattr(page_module, 'show'):
-        page_module.show()
+    module = importlib.import_module(modulename)
+    if hasattr(module, "show"):
+        module.show()
     else:
-        st.error(f"Module `{page_module_name}` found but missing a `show()` function.")
+        st.error(f"Module `{modulename}` missing `show()` function.")
 except ModuleNotFoundError:
-    st.error(f"Module `{page_module_name}.py` not found. Please create this file in your project directory.")
+    st.error(f"Module `{modulename}.py` not found.")
 except Exception as e:
-    st.error(f"Error loading `{page_module_name}`: {e}")
+    st.error(f"Error loading `{modulename}`: {e}")
