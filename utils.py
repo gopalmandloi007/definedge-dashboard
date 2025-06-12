@@ -1,53 +1,68 @@
 import streamlit as st
 import requests
 
+BASE_URL = "https://integrate.definedgesecurities.com/dart/v1"
+
 @st.cache_resource(show_spinner=False)
 def get_api_session_key():
     return st.secrets["integrate_api_session_key"]
 
-def definedge_get(relative_url, params=None):
-    url = f"https://trade.definedgesecurities.com{relative_url}"
+def integrate_get(endpoint, params=None):
+    url = BASE_URL + endpoint
     headers = {"Authorization": get_api_session_key()}
     try:
-        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         if "application/json" in resp.headers.get("Content-Type", ""):
-            try:
-                return resp.json()
-            except Exception as e:
-                st.error(f"Invalid JSON response: {resp.text[:300]}")
-                return {}
+            return resp.json()
         else:
-            st.error(f"Non-JSON response received: {resp.text[:300]}")
+            st.error(f"Non-JSON response: {resp.text[:200]}")
             return {}
-    except requests.exceptions.HTTPError as e:
-        st.error(f"HTTP {resp.status_code}: {resp.text[:300]}")
-        return {}
     except Exception as e:
-        st.error(f"Request error: {str(e)}")
+        st.error(f"GET {url} failed: {e}")
         return {}
 
-def definedge_post(relative_url, data=None):
-    url = f"https://trade.definedgesecurities.com{relative_url}"
-    headers = {
-        "Authorization": get_api_session_key(),
-        "Content-Type": "application/json",
-    }
+def integrate_post(endpoint, data=None):
+    url = BASE_URL + endpoint
+    headers = {"Authorization": get_api_session_key(), "Content-Type": "application/json"}
     try:
-        resp = requests.post(url, json=data, headers=headers, timeout=10)
+        resp = requests.post(url, headers=headers, json=data, timeout=10)
         resp.raise_for_status()
         if "application/json" in resp.headers.get("Content-Type", ""):
-            try:
-                return resp.json()
-            except Exception as e:
-                st.error(f"Invalid JSON response: {resp.text[:300]}")
-                return {}
+            return resp.json()
         else:
-            st.error(f"Non-JSON response received: {resp.text[:300]}")
+            st.error(f"Non-JSON response: {resp.text[:200]}")
             return {}
-    except requests.exceptions.HTTPError as e:
-        st.error(f"HTTP {resp.status_code}: {resp.text[:300]}")
-        return {}
     except Exception as e:
-        st.error(f"Request error: {str(e)}")
+        st.error(f"POST {url} failed: {e}")
+        return {}
+
+def integrate_put(endpoint, data=None):
+    url = BASE_URL + endpoint
+    headers = {"Authorization": get_api_session_key(), "Content-Type": "application/json"}
+    try:
+        resp = requests.put(url, headers=headers, json=data, timeout=10)
+        resp.raise_for_status()
+        if "application/json" in resp.headers.get("Content-Type", ""):
+            return resp.json()
+        else:
+            st.error(f"Non-JSON response: {resp.text[:200]}")
+            return {}
+    except Exception as e:
+        st.error(f"PUT {url} failed: {e}")
+        return {}
+
+def integrate_delete(endpoint, params=None):
+    url = BASE_URL + endpoint
+    headers = {"Authorization": get_api_session_key()}
+    try:
+        resp = requests.delete(url, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        if "application/json" in resp.headers.get("Content-Type", ""):
+            return resp.json()
+        else:
+            st.error(f"Non-JSON response: {resp.text[:200]}")
+            return {}
+    except Exception as e:
+        st.error(f"DELETE {url} failed: {e}")
         return {}
