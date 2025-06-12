@@ -10,7 +10,12 @@ def squareoff_hold_form(holding, qty, tradingsymbols):
     st.write(f"**T1 Quantity:** {holding.get('t1_qty','-')}")
     st.write(f"**Haircut:** {holding.get('haircut','-')}")
 
-    with st.form(key=f"squareoff_hold_form_{tradingsymbols[0]['tradingsymbol']}"):
+    form_key = f"squareoff_hold_form_{tradingsymbols[0]['tradingsymbol']}"
+    confirm_key = f"confirm_{tradingsymbols[0]['tradingsymbol']}"
+    if confirm_key not in st.session_state:
+        st.session_state[confirm_key] = False
+
+    with st.form(key=form_key):
         exch_names = [x['exchange'] for x in tradingsymbols]
         exch = st.selectbox("Select Exchange", exch_names)
         ts_info = next(x for x in tradingsymbols if x['exchange'] == exch)
@@ -46,7 +51,7 @@ def squareoff_hold_form(holding, qty, tradingsymbols):
         else:
             disclosed_quantity = None
 
-        # Warn user if default values are being used
+        # Warning/info
         if qty_option == "Partial" and squareoff_qty == 1:
             st.warning("⚠ You have selected Partial but quantity is only 1. Please confirm if this is correct.")
         if price_option == "Limit Order" and squareoff_price == round(float(holding.get("avg_buy_price") or 0),2):
@@ -54,7 +59,15 @@ def squareoff_hold_form(holding, qty, tradingsymbols):
 
         st.markdown("---")
         submitted = st.form_submit_button("🟢 Place Square Off Order")
-        if submitted:
+
+        # Double confirmation logic
+        if submitted and not st.session_state[confirm_key]:
+            st.session_state[confirm_key] = True
+            st.warning("Please **review all values above** and click 'Place Square Off Order' again to confirm!")
+            st.stop() # halt code here, don't POST yet
+
+        if submitted and st.session_state[confirm_key]:
+            st.session_state[confirm_key] = False # reset for next time
             payload = {
                 "exchange": exch,
                 "tradingsymbol": tradingsymbol,
@@ -74,24 +87,3 @@ def squareoff_hold_form(holding, qty, tradingsymbols):
             status = resp.get('status') or resp.get('message') or resp
             st.success(f"Order Response: {status}")
             st.json(resp)
-
-def show():
-    st.title("⚡ Definedge Integrate Dashboard")
-    st.subheader("💼 Square Off Positions & Holdings")
-    st.markdown("---")
-    st.header("📦 Holdings")
-    data = integrate_get("/holdings")
-    st.write("DEBUG holdings API response:", data)  # Remove this after debugging!
-    holdings = data.get("data", [])
-    user_holdings = []
-    for h in holdings:
-        qty = int(float(h.get("dp_qty", 0)))
-        tradingsymbols = h.get("tradingsymbol", [])
-        if qty > 0 and tradingsymbols and isinstance(tradingsymbols, list):
-            user_holdings.append((h, qty, tradingsymbols))
-    if not user_holdings:
-        st.info("No holdings to square off.")
-    else:
-        for holding, qty, tradingsymbols in user_holdings:
-            with st.expander(f"{tradingsymbols[0]['tradingsymbol']} | Qty: {qty}", expanded=False):
-                squareoff_hold_form(holding, qty, tradingsymbols)
