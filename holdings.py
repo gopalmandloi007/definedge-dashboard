@@ -11,6 +11,26 @@ def show():
         st.info("No holdings found.")
         return
 
+    # Gather all symbol/exchange pairs for quote fetch
+    symbol_exch = []
+    for h in holdings:
+        ts = h.get("tradingsymbol")
+        if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
+            tsym = ts[0].get("tradingsymbol", "N/A")
+            exch = ts[0].get("exchange", "N/A")
+        else:
+            tsym = ts if isinstance(ts, str) else "N/A"
+            exch = h.get("exchange", "NSE")
+        if tsym != "N/A":
+            symbol_exch.append({"tradingsymbol": tsym, "exchange": exch})
+
+    # Fetch all quotes at once (if your API allows)
+    quotes = {}
+    if symbol_exch:
+        quotes_data = integrate_get("/quotes", params={"symbols": symbol_exch})
+        # Example: quotes_data = {"SBIN": {"ltp": 800, "prev_close": 790}, ...}
+        quotes = quotes_data.get("data", {})
+
     rows = []
     total_today_pnl = 0
     total_overall_pnl = 0
@@ -18,7 +38,6 @@ def show():
     total_current = 0
 
     for h in holdings:
-        # Handle both string and list for tradingsymbol
         ts = h.get("tradingsymbol")
         if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
             tsym = ts[0].get("tradingsymbol", "N/A")
@@ -29,10 +48,12 @@ def show():
             exch = h.get("exchange", "NSE")
             isin = h.get("isin", "")
 
-        ltp = float(h.get("ltp", 0) or 0)
+        # Use LTP/prev_close from quotes if provided, else fallback
+        ltp = float(quotes.get(tsym, {}).get("ltp", h.get("ltp", 0) or 0))
+        prev_close = float(quotes.get(tsym, {}).get("prev_close", h.get("prev_close", 0) or 0))
+
         avg_buy = float(h.get("avg_buy_price", 0) or 0)
         qty = float(h.get("dp_qty", 0) or 0)
-        prev_close = float(h.get("prev_close", 0) or 0)
         t1_qty = h.get("t1_qty", 0)
         haircut = h.get("haircut", 0)
         collateral_qty = h.get("collateral_qty", 0)
@@ -42,18 +63,12 @@ def show():
         invested = avg_buy * qty
         current = ltp * qty
 
-        # Today P&L
         today_pnl = (ltp - prev_close) * qty if prev_close else 0
         overall_pnl = (ltp - avg_buy) * qty if avg_buy else 0
-
-        # Percent changes
         pct_chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0
         pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if avg_buy else 0
+        realized_pnl = 0
 
-        # Realized P&L (if any, for exited qty)
-        realized_pnl = 0  # Can be calculated if API provides exited qty and sell avg price
-
-        # Totals
         total_today_pnl += today_pnl
         total_overall_pnl += overall_pnl
         total_invested += invested
