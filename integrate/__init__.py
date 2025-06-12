@@ -8,4 +8,5 @@ class IntegrateOrders:
     def __init__(self, conn):
         self.conn = conn
     def holdings(self):
-        return {"data": []}  # Dummy data, real logic baad me
+        # Dummy data, real logic baad me
+        return {"data": []}
