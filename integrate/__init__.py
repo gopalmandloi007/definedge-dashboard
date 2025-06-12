@@ -8,5 +8,5 @@ class IntegrateOrders:
     def __init__(self, conn):
         self.conn = conn
     def holdings(self):
-        # Dummy data, real logic baad me
-        return {"data": []}
+        # Dummy data for testing
+        return {"data": [{"dp_qty": 10, "avg_buy_price": 100, "tradingsymbol": [{"exchange": "NSE", "tradingsymbol": "SBIN", "token": "123", "isin": "IN1234567890"}]}]}
