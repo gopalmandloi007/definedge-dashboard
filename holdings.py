@@ -84,10 +84,10 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
 
     headers = [
         "Symbol", "LTP", "Avg Buy", "Qty", "P.Close", "%Chg", "Today P&L", "Overall P&L",
-        "Realized P&L", "%Chg Avg", "Invested", "Current", "Exchange", "ISIN", "T1", "Haircut", "Coll Qty", "Sell Amt", "Trade Qty"
+        "Realized P&L", "%Chg Avg", "Invested", "Current", "Exchange", "ISIN", "T1", "Haircut", "Coll Qty", "Sell Amt", "Trade Qty", "Square Off"
     ]
 
-    for h in raw:
+    for idx, h in enumerate(raw):
         dp_qty = float(h.get("dp_qty", 0) or 0)
         avg_buy_price = float(h.get("avg_buy_price", 0) or 0)
         t1_qty = h.get("t1_qty", "N/A")
@@ -138,13 +138,35 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
                     pct_change = "N/A"
                     pct_change_avg = "N/A"
 
-                # Totals only from holding qty (unrealized)
                 total_today_pnl += today_pnl
                 total_overall_pnl += overall_pnl
                 total_invested += invested
                 total_current += current
 
-                # For display: realized P&L as column
+                # Square off option as a Streamlit button
+                squareoff_col = st.button(
+                    f"Square Off {tsym}",
+                    key=f"squareoff_{idx}_{tsym}"
+                )
+
+                # Handle square off logic
+                if squareoff_col:
+                    try:
+                        # CNC Sell
+                        order_data = {
+                            "exchange": exch,
+                            "order_type": "SELL",
+                            "price": 0,
+                            "price_type": "MARKET",
+                            "product_type": "CNC",
+                            "quantity": int(holding_qty),
+                            "tradingsymbol": tsym
+                        }
+                        resp = io.place_order(order_data)
+                        st.success(f"Square off order placed for {tsym}: {resp}")
+                    except Exception as e:
+                        st.error(f"Failed to square off {tsym}: {e}")
+
                 table.append([
                     tsym,
                     f"{ltp:.2f}" if ltp is not None else "N/A",
@@ -164,10 +186,10 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
                     haircut,
                     collateral_qty,
                     f"{sell_amt:.2f}",
-                    int(trade_qty)
+                    int(trade_qty),
+                    "Click Above"
                 ])
 
-    # Add realized P&L from exited qty to totals
     total_today_pnl += total_realized_today
     total_overall_pnl += total_realized_overall
 
@@ -180,63 +202,9 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
     }
     return df, summary
 
-def positions_tabular(positions_book):
-    raw = positions_book.get('positions', [])
-    table = []
-    if not raw or len(raw) == 0:
-        return pd.DataFrame(), pd.DataFrame()
-    headers = list(raw[0].keys())
-    important_cols = [
-        ("tradingsymbol", "Symbol"),
-        ("net_averageprice", "Avg. Buy"),
-        ("net_quantity", "Qty"),
-        ("unrealized_pnl", "Unrealised P&L"),
-        ("realized_pnl", "Realized P&L"),
-        ("percent_change", "% Change"),
-        ("product_type", "Product Type"),
-    ]
-    all_keys = list(raw[0].keys()) if raw else []
-    rest_keys = [k for k in all_keys if k not in [col[0] for col in important_cols]]
-    headers = [col[1] for col in important_cols] + rest_keys
-    total_unrealized = 0.0
-    total_realized = 0.0
-    for p in raw:
-        try:
-            last_price = float(p.get("lastPrice", 0))
-            avg_price = float(p.get("net_averageprice", 0))
-            if avg_price:
-                percent_change = round((last_price - avg_price) / avg_price * 100, 2)
-            else:
-                percent_change = "N/A"
-        except Exception:
-            percent_change = "N/A"
-        row = [p.get(col[0], "") for col in important_cols[:-2]]
-        row.append(percent_change)
-        row.append(p.get("product_type", ""))
-        row += [p.get(k, "") for k in rest_keys]
-        table.append(row)
-        try:
-            total_unrealized += float(p.get("unrealized_pnl", 0) or 0)
-        except Exception:
-            pass
-        try:
-            total_realized += float(p.get("realized_pnl", 0) or 0)
-        except Exception:
-            pass
-
-    summary_table = [
-        ["Total Realized P&L", round(total_realized, 2)],
-        ["Total Unrealized P&L", round(total_unrealized, 2)],
-        ["Total Net P&L", round(total_realized + total_unrealized, 2)]
-    ]
-    df_sum = pd.DataFrame(summary_table, columns=["Summary", "Amount"])
-    df = pd.DataFrame(table, columns=headers)
-    return df_sum, df
-
 st.set_page_config(page_title="Dashboard", layout="wide")
 st.title("Perfect Holdings / Positions (Live LTP & P&L)")
 
-# Holdings
 st.header("Holdings")
 try:
     holdings_book = io.holdings()
@@ -251,18 +219,3 @@ try:
         st.dataframe(df_hold)
 except Exception as e:
     st.error(f"Failed to get holdings: {e}")
-
-# Positions
-st.header("Positions")
-try:
-    positions_book = io.positions()
-    if not positions_book.get("positions"):
-        st.info("No positions found or API returned: " + str(positions_book))
-    else:
-        df_sum, df_pos = positions_tabular(positions_book)
-        st.write("**Summary**")
-        st.dataframe(df_sum)
-        st.write(f"**Total NSE Positions: {len(df_pos)}**")
-        st.dataframe(df_pos)
-except Exception as e:
-    st.error(f"Failed to get positions: {e}")
