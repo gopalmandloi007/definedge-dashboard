@@ -1,7 +1,10 @@
 import streamlit as st
 
-# THIS MUST BE FIRST STREAMLIT COMMAND!
-st.set_page_config(page_title="Dashboard", layout="wide")
+# Yeh line sabse pehle, baaki kahin bhi dobara nahi!
+st.set_page_config(
+    page_title="Definedge Integrate Dashboard",
+    layout="wide"
+)
 
 import pandas as pd
 from integrate import ConnectToIntegrate, IntegrateOrders
@@ -184,63 +187,9 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
     }
     return df, summary
 
-def positions_tabular(positions_book):
-    raw = positions_book.get('positions', [])
-    table = []
-    if not raw or len(raw) == 0:
-        return pd.DataFrame(), pd.DataFrame()
-    headers = list(raw[0].keys())
-    important_cols = [
-        ("tradingsymbol", "Symbol"),
-        ("net_averageprice", "Avg. Buy"),
-        ("net_quantity", "Qty"),
-        ("unrealized_pnl", "Unrealised P&L"),
-        ("realized_pnl", "Realized P&L"),
-        ("percent_change", "% Change"),
-        ("product_type", "Product Type"),
-    ]
-    all_keys = list(raw[0].keys()) if raw else []
-    rest_keys = [k for k in all_keys if k not in [col[0] for col in important_cols]]
-    headers = [col[1] for col in important_cols] + rest_keys
-    total_unrealized = 0.0
-    total_realized = 0.0
-    for p in raw:
-        try:
-            last_price = float(p.get("lastPrice", 0))
-            avg_price = float(p.get("net_averageprice", 0))
-            if avg_price:
-                percent_change = round((last_price - avg_price) / avg_price * 100, 2)
-            else:
-                percent_change = "N/A"
-        except Exception:
-            percent_change = "N/A"
-        row = [p.get(col[0], "") for col in important_cols[:-2]]
-        row.append(percent_change)
-        row.append(p.get("product_type", ""))
-        row += [p.get(k, "") for k in rest_keys]
-        table.append(row)
-        try:
-            total_unrealized += float(p.get("unrealized_pnl", 0) or 0)
-        except Exception:
-            pass
-        try:
-            total_realized += float(p.get("realized_pnl", 0) or 0)
-        except Exception:
-            pass
-
-    summary_table = [
-        ["Total Realized P&L", round(total_realized, 2)],
-        ["Total Unrealized P&L", round(total_unrealized, 2)],
-        ["Total Net P&L", round(total_realized + total_unrealized, 2)]
-    ]
-    df_sum = pd.DataFrame(summary_table, columns=["Summary", "Amount"])
-    df = pd.DataFrame(table, columns=headers)
-    return df_sum, df
-
-st.title("Perfect Holdings / Positions (Live LTP & P&L)")
-
-# Holdings
+st.title("Definedge Integrate Dashboard")
 st.header("Holdings")
+
 try:
     holdings_book = io.holdings()
     if not holdings_book.get("data"):
@@ -253,19 +202,4 @@ try:
         st.write(f"**Total NSE Holdings: {len(df_hold)}**")
         st.dataframe(df_hold)
 except Exception as e:
-    st.error(f"Failed to get holdings: {e}")
-
-# Positions
-st.header("Positions")
-try:
-    positions_book = io.positions()
-    if not positions_book.get("positions"):
-        st.info("No positions found or API returned: " + str(positions_book))
-    else:
-        df_sum, df_pos = positions_tabular(positions_book)
-        st.write("**Summary**")
-        st.dataframe(df_sum)
-        st.write(f"**Total NSE Positions: {len(df_pos)}**")
-        st.dataframe(df_pos)
-except Exception as e:
-    st.error(f"Failed to get positions: {e}")
+    st.error(f"Error loading holdings: {e}")
