@@ -1,6 +1,7 @@
 import streamlit as st
 
-st.set_page_config(page_title="Dashboard", layout="wide")  # Must be first Streamlit call
+# MUST be the first Streamlit command
+st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 
 import pandas as pd
 import requests
@@ -74,7 +75,6 @@ def squareoff(exchange, tsym, qty):
         "tradingsymbol": tsym
     }
     try:
-        # integrate_post should use Auth/session from context, do NOT pass session_key here
         return integrate_post("/orders", data=order_data)
     except Exception as e:
         return f"Order error: {e}"
@@ -151,7 +151,6 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
                 total_invested += invested
                 total_current += current
 
-                # --- SINGLE-LINE SQUARE OFF BUTTON ---
                 cols = st.columns([6, 1])
                 info_str = f"{tsym} | Qty: {int(holding_qty)} | LTP: {ltp if ltp is not None else 'N/A'} | Today P&L: {today_pnl:.2f} | Overall P&L: {overall_pnl:.2f}"
                 with cols[0]:
@@ -164,7 +163,6 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
                         else:
                             st.warning("No holding quantity to square off.")
 
-                # For DataFrame/table view
                 table.append([
                     tsym,
                     f"{ltp:.2f}" if ltp is not None else "N/A",
@@ -199,11 +197,9 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
     }
     return df, summary
 
-# --- Main App ---
-st.title("Perfect Holdings / Positions (Live LTP & P&L)")
-
-# Holdings
+st.title("Definedge Integrate Dashboard")
 st.header("Holdings")
+
 api_session_key = st.secrets["integrate_api_session_key"]
 api_token = st.secrets["integrate_api_token"]
 api_secret = st.secrets["integrate_api_secret"]
