@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-from utils import integrate_get  # aapka existing function
+from utils import integrate_get
 
 def safe_float(val):
     try:
@@ -24,16 +24,13 @@ def get_ltp(exchange, token, api_session_key):
     return 0.0
 
 def get_prev_close(exchange, token, api_session_key):
-    # previous trading day calculate karo (safely handle weekends)
     today = datetime.now()
-    # Go back until you get a weekday (Mon-Fri)
     for i in range(1, 5):
         prev_day = today - timedelta(days=i)
-        if prev_day.weekday() < 5:  # 0-4 are Mon-Fri
+        if prev_day.weekday() < 5:
             break
     else:
         prev_day = today - timedelta(days=1)
-    # From: prev_day 00:00, To: today 15:30
     from_str = prev_day.strftime("%d%m%Y0000")
     to_str = today.strftime("%d%m%Y1530")
     url = f"https://data.definedgesecurities.com/sds/history/{exchange}/{token}/day/{from_str}/{to_str}"
@@ -43,7 +40,6 @@ def get_prev_close(exchange, token, api_session_key):
         if resp.status_code == 200:
             rows = resp.text.strip().split("\n")
             if len(rows) >= 2:
-                # Last but one row is previous day
                 prev_row = rows[-2]
                 prev_close = safe_float(prev_row.split(",")[4])
                 return prev_close
@@ -65,14 +61,25 @@ def show():
             st.info("No holdings found.")
             return
 
+        # ❗ Filter only ACTIVE holdings (qty > 0)
+        active_holdings = []
+        for h in holdings:
+            qty = 0.0
+            ts = h.get("tradingsymbol")
+            if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
+                qty = safe_float(ts[0].get("dp_qty", h.get("dp_qty", 0)))
+            else:
+                qty = safe_float(h.get("dp_qty", 0))
+            if qty > 0:
+                active_holdings.append(h)
+
         rows = []
         total_today_pnl = 0.0
         total_overall_pnl = 0.0
         total_invested = 0.0
         total_current = 0.0
 
-        for h in holdings:
-            # Extract symbol, exchange, token
+        for h in active_holdings:
             ts = h.get("tradingsymbol")
             exch = h.get("exchange", "NSE")
             token = None
@@ -82,15 +89,14 @@ def show():
                 exch = ts[0].get("exchange", exch)
                 token = ts[0].get("token")
                 isin = ts[0].get("isin", "")
+                qty = safe_float(ts[0].get("dp_qty", h.get("dp_qty", 0)))
             else:
                 tsym = ts if isinstance(ts, str) else "N/A"
                 token = h.get("token")
                 isin = h.get("isin", "")
+                qty = safe_float(h.get("dp_qty", 0))
 
             avg_buy = safe_float(h.get("avg_buy_price", 0))
-            qty = safe_float(h.get("dp_qty", 0))
-
-            # Get LTP and Prev Close using APIs
             ltp = get_ltp(exch, token, api_session_key) if token else 0.0
             prev_close = get_prev_close(exch, token, api_session_key) if token else 0.0
 
@@ -103,7 +109,6 @@ def show():
             invested = avg_buy * qty
             current = ltp * qty
 
-            # Today P&L and Overall P&L
             today_pnl = (ltp - prev_close) * qty if prev_close else 0.0
             overall_pnl = (ltp - avg_buy) * qty if avg_buy else 0.0
             pct_chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
@@ -154,7 +159,6 @@ def show():
         )
 
         st.markdown(f"**Total NSE Holdings: {len(df)}**")
-
         st.dataframe(df, use_container_width=True)
 
     except Exception as e:
