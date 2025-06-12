@@ -9,12 +9,13 @@ PAGES = {
     "Positions": "positions",
     "Order Book": "orderbook",
     "Orders": "orders",
-    "Order Manage": "order_manage",         # <--- NEW LINE for manage/modify/cancel
+    "Order Manage": "order_manage",
     "Limits": "limits",
     "Margin": "margin",
     "Quotes": "quotes",
     "GTT": "gtt",
     "GTT/OCO Manage": "gtt_oco_manage",
+    "Square Off": "squareoff",  # <-- YEH LINE ADD KAREN
     "Websocket Help": "websocket_help",
 }
 
