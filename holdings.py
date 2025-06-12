@@ -1,23 +1,25 @@
 import streamlit as st
 
-# Must be the very first Streamlit command
-st.set_page_config(
-    page_title="Definedge Integrate Dashboard",
-    page_icon=":bar_chart:",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        'Get Help': 'https://www.definedge.com/support',
-        'Report a bug': "https://www.definedge.com/bug",
-        'About': "# Definedge Integrate Dashboard\nShows live holdings and square-off actions."
-    }
-)
+# THIS MUST BE FIRST STREAMLIT COMMAND!
+st.set_page_config(page_title="Dashboard", layout="wide")
 
 import pandas as pd
+from integrate import ConnectToIntegrate, IntegrateOrders
 import requests
 from datetime import datetime, timedelta
-from utils import integrate_get, integrate_post
-from integrate import ConnectToIntegrate, IntegrateOrders
+
+# --- Load secrets
+api_token = st.secrets["integrate_api_token"]
+api_secret = st.secrets["integrate_api_secret"]
+uid = st.secrets["integrate_uid"]
+actid = st.secrets["integrate_actid"]
+api_session_key = st.secrets["integrate_api_session_key"]
+ws_session_key = st.secrets["integrate_ws_session_key"]
+
+conn = ConnectToIntegrate()
+conn.login(api_token, api_secret)
+conn.set_session_keys(uid, actid, api_session_key, ws_session_key)
+io = IntegrateOrders(conn)
 
 def get_definedge_ltp_and_yclose(segment, token, session_key, max_days_lookback=10):
     headers = {'Authorization': session_key}
@@ -74,21 +76,6 @@ def build_master_mapping_from_holdings(holdings_book):
                     mapping[(exch, tsym)] = {'segment': exch, 'token': token}
     return mapping
 
-def squareoff(exchange, tsym, qty):
-    order_data = {
-        "exchange": exchange,
-        "order_type": "SELL",
-        "price": 0,
-        "price_type": "MARKET",
-        "product_type": "CNC",
-        "quantity": int(qty),
-        "tradingsymbol": tsym
-    }
-    try:
-        return integrate_post("/orders", data=order_data)
-    except Exception as e:
-        return f"Order error: {e}"
-
 def holdings_tabular(holdings_book, master_mapping, session_key):
     raw = holdings_book.get('data', [])
     table = []
@@ -104,8 +91,7 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
         "Realized P&L", "%Chg Avg", "Invested", "Current", "Exchange", "ISIN", "T1", "Haircut", "Coll Qty", "Sell Amt", "Trade Qty"
     ]
 
-    st.markdown("### NSE Holdings (with Square Off option)")
-    for idx, h in enumerate(raw):
+    for h in raw:
         dp_qty = float(h.get("dp_qty", 0) or 0)
         avg_buy_price = float(h.get("avg_buy_price", 0) or 0)
         t1_qty = h.get("t1_qty", "N/A")
@@ -156,23 +142,13 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
                     pct_change = "N/A"
                     pct_change_avg = "N/A"
 
+                # Totals only from holding qty (unrealized)
                 total_today_pnl += today_pnl
                 total_overall_pnl += overall_pnl
                 total_invested += invested
                 total_current += current
 
-                cols = st.columns([6, 1])
-                info_str = f"{tsym} | Qty: {int(holding_qty)} | LTP: {ltp if ltp is not None else 'N/A'} | Today P&L: {today_pnl:.2f} | Overall P&L: {overall_pnl:.2f}"
-                with cols[0]:
-                    st.write(info_str)
-                with cols[1]:
-                    if st.button("Square Off", key=f"squareoff_{idx}_{tsym}"):
-                        if holding_qty > 0:
-                            resp = squareoff(exch, tsym, holding_qty)
-                            st.success(f"Square off order placed for {tsym}: {resp}")
-                        else:
-                            st.warning("No holding quantity to square off.")
-
+                # For display: realized P&L as column
                 table.append([
                     tsym,
                     f"{ltp:.2f}" if ltp is not None else "N/A",
@@ -195,6 +171,7 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
                     int(trade_qty)
                 ])
 
+    # Add realized P&L from exited qty to totals
     total_today_pnl += total_realized_today
     total_overall_pnl += total_realized_overall
 
@@ -207,22 +184,63 @@ def holdings_tabular(holdings_book, master_mapping, session_key):
     }
     return df, summary
 
-# --- Main App ---
-st.title("Definedge Integrate Dashboard")
+def positions_tabular(positions_book):
+    raw = positions_book.get('positions', [])
+    table = []
+    if not raw or len(raw) == 0:
+        return pd.DataFrame(), pd.DataFrame()
+    headers = list(raw[0].keys())
+    important_cols = [
+        ("tradingsymbol", "Symbol"),
+        ("net_averageprice", "Avg. Buy"),
+        ("net_quantity", "Qty"),
+        ("unrealized_pnl", "Unrealised P&L"),
+        ("realized_pnl", "Realized P&L"),
+        ("percent_change", "% Change"),
+        ("product_type", "Product Type"),
+    ]
+    all_keys = list(raw[0].keys()) if raw else []
+    rest_keys = [k for k in all_keys if k not in [col[0] for col in important_cols]]
+    headers = [col[1] for col in important_cols] + rest_keys
+    total_unrealized = 0.0
+    total_realized = 0.0
+    for p in raw:
+        try:
+            last_price = float(p.get("lastPrice", 0))
+            avg_price = float(p.get("net_averageprice", 0))
+            if avg_price:
+                percent_change = round((last_price - avg_price) / avg_price * 100, 2)
+            else:
+                percent_change = "N/A"
+        except Exception:
+            percent_change = "N/A"
+        row = [p.get(col[0], "") for col in important_cols[:-2]]
+        row.append(percent_change)
+        row.append(p.get("product_type", ""))
+        row += [p.get(k, "") for k in rest_keys]
+        table.append(row)
+        try:
+            total_unrealized += float(p.get("unrealized_pnl", 0) or 0)
+        except Exception:
+            pass
+        try:
+            total_realized += float(p.get("realized_pnl", 0) or 0)
+        except Exception:
+            pass
+
+    summary_table = [
+        ["Total Realized P&L", round(total_realized, 2)],
+        ["Total Unrealized P&L", round(total_unrealized, 2)],
+        ["Total Net P&L", round(total_realized + total_unrealized, 2)]
+    ]
+    df_sum = pd.DataFrame(summary_table, columns=["Summary", "Amount"])
+    df = pd.DataFrame(table, columns=headers)
+    return df_sum, df
+
+st.title("Perfect Holdings / Positions (Live LTP & P&L)")
+
+# Holdings
 st.header("Holdings")
-
-api_session_key = st.secrets["integrate_api_session_key"]
-api_token = st.secrets["integrate_api_token"]
-api_secret = st.secrets["integrate_api_secret"]
-uid = st.secrets["integrate_uid"]
-actid = st.secrets["integrate_actid"]
-ws_session_key = st.secrets["integrate_ws_session_key"]
-
-conn = ConnectToIntegrate()
-conn.login(api_token, api_secret)
-conn.set_session_keys(uid, actid, api_session_key, ws_session_key)
-io = IntegrateOrders(conn)
-
 try:
     holdings_book = io.holdings()
     if not holdings_book.get("data"):
@@ -236,3 +254,18 @@ try:
         st.dataframe(df_hold)
 except Exception as e:
     st.error(f"Failed to get holdings: {e}")
+
+# Positions
+st.header("Positions")
+try:
+    positions_book = io.positions()
+    if not positions_book.get("positions"):
+        st.info("No positions found or API returned: " + str(positions_book))
+    else:
+        df_sum, df_pos = positions_tabular(positions_book)
+        st.write("**Summary**")
+        st.dataframe(df_sum)
+        st.write(f"**Total NSE Positions: {len(df_pos)}**")
+        st.dataframe(df_pos)
+except Exception as e:
+    st.error(f"Failed to get positions: {e}")
