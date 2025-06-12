@@ -1,27 +1,16 @@
 # Definedge Dashboard
 
-A professional, modular, all-in-one dashboard for monitoring and managing your Definedge/Integrate trading account.
+A professional, attractive dashboard for monitoring and managing your Definedge/Integrate trading account.
 
 ## Features
 
-- Live Holdings & Positions with P&L, % change, Invested, Current Value, etc.
-- Direct Square Off from Holdings/Positions
-- Order Book, Trade Book, GTT Book — all with modify/cancel in-place
-- One-click Order Placement (CNC/AMO/LIMIT/MARKET/Intraday/Buy/Sell)
-- GTT Order placement (Single & OCO)
-- Modular code for maximum customisation
+- Live Holdings & Positions with colored P&L, summary cards, invested/current values.
+- Modular, extensible code.
+- Robust error handling.
 
 ## Setup
 
-1. Clone this repo
-2. Create a `.streamlit/secrets.toml` file with your API keys and session details (see [pyintegrate docs](https://github.com/Definedge/pyintegrate))
-3. Install requirements:  
-   `pip install -r requirements.txt`
-4. Run the app:  
-   `streamlit run app.py`
-
-## To-Do / Customisation
-
-- Add more analytics, charts, alerts, etc. as you wish!
-- PRs welcome.
-
+1. Clone this repo.
+2. Create `.streamlit/secrets.toml` with your credentials as described before.
+3. `pip install -r requirements.txt`
+4. `streamlit run app.py`
