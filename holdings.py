@@ -4,18 +4,20 @@ import requests
 from datetime import datetime, timedelta
 from utils import integrate_get, integrate_post
 
-def get_definedge_ltp_and_yclose(segment, token, session_key, max_days_lookback=10):
-    headers = {'Authorization': session_key}
+def get_definedge_ltp_and_yclose(exchange, token, session_key, max_days_lookback=10):
+    # LTP
     ltp = None
     try:
-        url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{segment}/{token}"
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
+        url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{token}"
+        headers = {'Authorization': session_key}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
             ltp = float(data.get('ltp')) if data.get('ltp') not in (None, "null", "") else None
     except Exception:
         pass
 
+    # Previous Close (yesterday's close from historical data)
     yclose = None
     closes = []
     for offset in range(1, max_days_lookback+1):
@@ -23,11 +25,12 @@ def get_definedge_ltp_and_yclose(segment, token, session_key, max_days_lookback=
         date_str = dt.strftime('%d%m%Y')
         from_time = f"{date_str}0000"
         to_time = f"{date_str}1530"
-        url = f"https://data.definedgesecurities.com/sds/history/{segment}/{token}/day/{from_time}/{to_time}"
+        url = f"https://data.definedgesecurities.com/sds/history/{exchange}/{token}/day/{from_time}/{to_time}"
+        headers = {'Authorization': session_key}
         try:
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                lines = response.text.strip().splitlines()
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                lines = resp.text.strip().splitlines()
                 for line in lines:
                     fields = line.split(',')
                     if len(fields) >= 5:
@@ -45,35 +48,20 @@ def get_definedge_ltp_and_yclose(segment, token, session_key, max_days_lookback=
         yclose = None
     return ltp, yclose
 
-def build_master_mapping_from_holdings(holdings_book):
-    mapping = {}
-    raw = holdings_book.get('data', [])
-    if not isinstance(raw, list):
-        return mapping
-    for h in raw:
-        tradingsymbols = h.get("tradingsymbol")
-        if isinstance(tradingsymbols, list):
-            for ts in tradingsymbols:
-                exch = ts.get("exchange", "NSE")
-                tsym = ts.get("tradingsymbol", "")
-                token = ts.get("token", "")
-                if exch and tsym and token:
-                    mapping[(exch, tsym)] = {'segment': exch, 'token': token}
-    return mapping
-
 def place_squareoff_order(exchange, tsym, qty, session_key):
+    order_data = {
+        "exchange": exchange,
+        "order_type": "SELL",
+        "price": 0,
+        "price_type": "MARKET",
+        "product_type": "CNC",
+        "quantity": int(qty),
+        "tradingsymbol": tsym
+    }
     try:
-        order_data = {
-            "exchange": exchange,
-            "order_type": "SELL",
-            "price": 0,
-            "price_type": "MARKET",
-            "product_type": "CNC",
-            "quantity": int(qty),
-            "tradingsymbol": tsym
-        }
-        # Use data= not json=
-        return integrate_post("/orders", data=order_data, session_key=session_key)
+        # Do not pass session_key as param; integrate_post should use context/global/session or add header internally
+        resp = integrate_post("/orders", data=order_data)
+        return resp
     except Exception as e:
         return f"Order error: {e}"
 
@@ -93,7 +81,6 @@ def show():
     total_current = 0
 
     st.markdown("### NSE Holdings (with Square Off option)")
-
     for idx, h in enumerate(holdings):
         ts = h.get("tradingsymbol")
         if isinstance(ts, list) and ts and isinstance(ts[0], dict):
@@ -110,11 +97,12 @@ def show():
         avg_buy = float(h.get("avg_buy_price", 0) or 0)
         invested = qty * avg_buy
 
+        # LIVE LTP and yclose
         ltp, prev_close = get_definedge_ltp_and_yclose(exch, token, session_key)
         current = qty * ltp if ltp is not None else 0
 
-        today_pnl = (ltp - prev_close) * qty if (ltp is not None and prev_close is not None and prev_close != 0) else 0
-        overall_pnl = (ltp - avg_buy) * qty if (ltp is not None and avg_buy != 0) else 0
+        today_pnl = (ltp - prev_close) * qty if (ltp is not None and prev_close not in (None, 0)) else 0
+        overall_pnl = (ltp - avg_buy) * qty if (ltp is not None and avg_buy not in (None, 0)) else 0
         pct_chg = ((ltp - prev_close) / prev_close * 100) if (ltp is not None and prev_close not in (None, 0)) else 0
         pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if (ltp is not None and avg_buy not in (None, 0)) else 0
 
@@ -140,7 +128,7 @@ def show():
         }
         rows.append(row)
 
-        # SINGLE LINE SQUARE OFF BUTTON
+        # --- SINGLE-LINE, SMALL Square Off BUTTON ---
         cols = st.columns([6, 1])
         info_str = f"{tsym} | Qty: {int(qty)} | LTP: {row['LTP']} | Today P&L: {row['Today P&L']} | Overall P&L: {row['Overall P&L']}"
         with cols[0]:
