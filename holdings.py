@@ -4,51 +4,76 @@ import requests
 from datetime import datetime, timedelta
 from utils import integrate_get, integrate_post
 
-def get_ltp(exchange, token, session_key):
-    url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{token}"
-    headers = {"Authorization": session_key}
+def get_definedge_ltp_and_yclose(segment, token, session_key, max_days_lookback=10):
+    headers = {'Authorization': session_key}
+    ltp = None
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            return float(data.get('ltp', 0) or 0)
-    except Exception as e:
-        print(f"LTP fetch error: {e}")
-    return 0.0
+        url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{segment}/{token}"
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            ltp = float(data.get('ltp')) if data.get('ltp') not in (None, "null", "") else None
+    except Exception:
+        pass
 
-def get_prev_close(exchange, token, session_key):
-    # Fetches previous 2 days closes and returns the 2nd last (previous close)
-    headers = {"Authorization": session_key}
-    dt = datetime.now()
-    date_str = dt.strftime('%d%m%Y')
-    from_time = f"{date_str}0000"
-    to_time = f"{date_str}1530"
-    url = f"https://data.definedgesecurities.com/sds/history/{exchange}/{token}/day/{from_time}/{to_time}"
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            lines = [x for x in resp.text.strip().splitlines() if x]
-            closes = [float(line.split(',')[4]) for line in lines if len(line.split(',')) > 4]
-            if len(closes) >= 2:
-                return closes[-2]
-    except Exception as e:
-        print(f"Prev close fetch error: {e}")
-    return 0.0
+    yclose = None
+    closes = []
+    for offset in range(1, max_days_lookback+1):
+        dt = datetime.now() - timedelta(days=offset-1)
+        date_str = dt.strftime('%d%m%Y')
+        from_time = f"{date_str}0000"
+        to_time = f"{date_str}1530"
+        url = f"https://data.definedgesecurities.com/sds/history/{segment}/{token}/day/{from_time}/{to_time}"
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                lines = response.text.strip().splitlines()
+                for line in lines:
+                    fields = line.split(',')
+                    if len(fields) >= 5:
+                        closes.append(float(fields[4]))
+                if len(closes) >= 2:
+                    break
+        except Exception:
+            pass
+        if len(closes) >= 2:
+            break
+    closes = list(dict.fromkeys(closes))
+    if len(closes) >= 2:
+        yclose = closes[-2]
+    else:
+        yclose = None
+    return ltp, yclose
+
+def build_master_mapping_from_holdings(holdings_book):
+    mapping = {}
+    raw = holdings_book.get('data', [])
+    if not isinstance(raw, list):
+        return mapping
+    for h in raw:
+        tradingsymbols = h.get("tradingsymbol")
+        if isinstance(tradingsymbols, list):
+            for ts in tradingsymbols:
+                exch = ts.get("exchange", "NSE")
+                tsym = ts.get("tradingsymbol", "")
+                token = ts.get("token", "")
+                if exch and tsym and token:
+                    mapping[(exch, tsym)] = {'segment': exch, 'token': token}
+    return mapping
 
 def place_squareoff_order(exchange, tsym, qty, session_key):
-    # Use data= not json= for requests
-    order_data = {
-        "exchange": exchange,
-        "order_type": "SELL",
-        "price": 0,
-        "price_type": "MARKET",
-        "product_type": "CNC",
-        "quantity": int(qty),
-        "tradingsymbol": tsym
-    }
     try:
-        resp = integrate_post("/orders", data=order_data, session_key=session_key)
-        return resp
+        order_data = {
+            "exchange": exchange,
+            "order_type": "SELL",
+            "price": 0,
+            "price_type": "MARKET",
+            "product_type": "CNC",
+            "quantity": int(qty),
+            "tradingsymbol": tsym
+        }
+        # Use data= not json=
+        return integrate_post("/orders", data=order_data, session_key=session_key)
     except Exception as e:
         return f"Order error: {e}"
 
@@ -67,6 +92,8 @@ def show():
     total_invested = 0
     total_current = 0
 
+    st.markdown("### NSE Holdings (with Square Off option)")
+
     for idx, h in enumerate(holdings):
         ts = h.get("tradingsymbol")
         if isinstance(ts, list) and ts and isinstance(ts[0], dict):
@@ -83,21 +110,20 @@ def show():
         avg_buy = float(h.get("avg_buy_price", 0) or 0)
         invested = qty * avg_buy
 
-        ltp = get_ltp(exch, token, session_key)
-        prev_close = get_prev_close(exch, token, session_key)
-        current = qty * ltp
+        ltp, prev_close = get_definedge_ltp_and_yclose(exch, token, session_key)
+        current = qty * ltp if ltp is not None else 0
 
-        today_pnl = (ltp - prev_close) * qty if prev_close else 0
-        overall_pnl = (ltp - avg_buy) * qty if avg_buy else 0
-        pct_chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0
-        pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if avg_buy else 0
+        today_pnl = (ltp - prev_close) * qty if (ltp is not None and prev_close is not None and prev_close != 0) else 0
+        overall_pnl = (ltp - avg_buy) * qty if (ltp is not None and avg_buy != 0) else 0
+        pct_chg = ((ltp - prev_close) / prev_close * 100) if (ltp is not None and prev_close not in (None, 0)) else 0
+        pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if (ltp is not None and avg_buy not in (None, 0)) else 0
 
         row = {
             "Symbol": tsym,
-            "LTP": round(ltp, 2),
+            "LTP": round(ltp, 2) if ltp is not None else "N/A",
             "Avg Buy": round(avg_buy, 2),
             "Qty": int(qty),
-            "P.Close": round(prev_close, 2),
+            "P.Close": round(prev_close, 2) if prev_close is not None else "N/A",
             "%Chg": round(pct_chg, 2),
             "Today P&L": round(today_pnl, 2),
             "Overall P&L": round(overall_pnl, 2),
@@ -114,12 +140,13 @@ def show():
         }
         rows.append(row)
 
-        # Square Off button for each row
-        col1, col2 = st.columns([9, 1])
-        with col1:
-            st.write(f"{tsym} | Qty: {int(qty)} | LTP: {round(ltp,2)} | Overall P&L: {round(overall_pnl,2)}")
-        with col2:
-            if st.button(f"Square Off {tsym}", key=f"squareoff_{idx}_{tsym}"):
+        # SINGLE LINE SQUARE OFF BUTTON
+        cols = st.columns([6, 1])
+        info_str = f"{tsym} | Qty: {int(qty)} | LTP: {row['LTP']} | Today P&L: {row['Today P&L']} | Overall P&L: {row['Overall P&L']}"
+        with cols[0]:
+            st.write(info_str)
+        with cols[1]:
+            if st.button("Square Off", key=f"squareoff_{idx}_{tsym}"):
                 if qty > 0:
                     resp = place_squareoff_order(exch, tsym, qty, session_key)
                     st.success(f"Square off order placed for {tsym}: {resp}")
