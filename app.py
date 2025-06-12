@@ -9,11 +9,12 @@ PAGES = {
     "Positions": "positions",
     "Order Book": "orderbook",
     "Orders": "orders",
+    "Order Manage": "order_manage",         # <--- NEW LINE for manage/modify/cancel
     "Limits": "limits",
     "Margin": "margin",
     "Quotes": "quotes",
     "GTT": "gtt",
-    "GTT/OCO Manage": "gtt_oco_manage",   # <-- naya option
+    "GTT/OCO Manage": "gtt_oco_manage",
     "Websocket Help": "websocket_help",
 }
 
