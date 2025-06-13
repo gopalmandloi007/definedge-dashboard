@@ -6,7 +6,63 @@ import io
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
 
-# --- Paste your helper functions from your existing code here: load_master, fetch_candles_definedge, compute_ema, count_updays, count_downdays, get_time_range ---
+# --- Helper functions copied from your working code ---
+
+@st.cache_data
+def load_master():
+    df = pd.read_csv("master.csv", sep="\t", header=None)
+    df.columns = [
+        "segment", "token", "symbol", "instrument", "series", "isin1",
+        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
+    ]
+    return df[["segment", "token", "symbol", "instrument"]]
+
+def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
+    url = f"https://data.definedgesecurities.com/sds/history/{segment}/{token}/{timeframe}/{from_dt}/{to_dt}"
+    headers = {"Authorization": api_key}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code != 200:
+        raise Exception(f"API error: {resp.status_code} {resp.text}")
+    cols = ["Dateandtime", "Open", "High", "Low", "Close", "Volume", "OI"]
+    df = pd.read_csv(io.StringIO(resp.text), header=None, names=cols)
+    df = df[df["Dateandtime"].notnull()]
+    df = df[df["Dateandtime"].astype(str).str.strip() != ""]
+    df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d%m%Y%H%M", errors="coerce")
+    df = df.dropna(subset=["Date"])
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+def compute_ema(series, period):
+    return series.ewm(span=period, adjust=False).mean()
+
+def count_updays(df, window=15):
+    highs = df["High"].values
+    count = 0
+    for i in range(-window, 0):
+        if i - 1 < -len(highs):
+            continue
+        if highs[i] > highs[i-1]:
+            count += 1
+    return count
+
+def count_downdays(df, window=15):
+    lows = df["Low"].values
+    count = 0
+    for i in range(-window, 0):
+        if i - 1 < -len(lows):
+            continue
+        if lows[i] < lows[i-1]:
+            count += 1
+    return count
+
+def get_time_range(days, endtime="1530"):
+    to = datetime.now()
+    to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
+    frm = to - timedelta(days=days)
+    return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
+
+# --- Main scan and plotting functions as previously given ---
 
 def scan_symbols(master_df, api_key, updown_window=15, days=120, ema_ltp_thr=0.95, ema_ratio_thr=0.95):
     result = []
