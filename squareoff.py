@@ -2,7 +2,6 @@ import streamlit as st
 from utils import integrate_get, integrate_post
 
 def squareoff_form(item, qty, ts_info, is_position=False):
-    # item: holding or position dict, qty: int, ts_info: dict with tradingsymbol, exchange
     st.markdown("---")
     label = "Position" if is_position else "Holding"
     st.subheader(f"Square Off {label}: {ts_info['tradingsymbol']} ({qty} Qty)")
@@ -23,6 +22,7 @@ def squareoff_form(item, qty, ts_info, is_position=False):
         with col3:
             price_option = st.radio("Order Type", ["Market Order", "Limit Order"], horizontal=True, key=f"pricetype_{tradingsymbol}")
             if price_option == "Limit Order":
+                # Try both avg_buy_price and average_price for holdings/positions
                 default_price = float(item.get("avg_buy_price") or item.get("average_price") or 0)
                 squareoff_price = st.number_input(
                     "Limit Price (₹)", min_value=0.01, value=round(default_price,2), key=f"price_{tradingsymbol}")
@@ -111,6 +111,10 @@ def show():
     st.header("📝 Positions")
     pdata = integrate_get("/positions")
     positions = pdata.get("data", [])
+
+    # --- DEBUG: Show raw data for troubleshooting if needed
+    # st.write("Raw positions data:", positions)
+
     # Table columns
     pos_cols = ["tradingsymbol", "exchange", "product_type", "quantity", "buy_avg_price", "sell_avg_price", "net_qty", "pnl"]
     pos_labels = ["Symbol", "Exch", "Product", "Qty", "Buy Avg", "Sell Avg", "Net Qty", "PnL"]
@@ -122,7 +126,8 @@ def show():
 
     user_positions = []
     for p in positions:
-        qty = int(float(p.get("quantity", 0)))
+        # Try both "quantity" and "net_qty" (adapt if your API uses different field)
+        qty = int(float(p.get("net_qty", p.get("quantity", 0))))
         if abs(qty) > 0:
             user_positions.append(p)
     if not user_positions:
@@ -144,6 +149,10 @@ def show():
                     "exchange": pos.get("exchange"),
                     "isin": pos.get("isin", ""),
                 }
-                qty = abs(int(float(pos.get("quantity", 0))))
+                qty = abs(int(float(pos.get("net_qty", pos.get("quantity", 0)))))
                 squareoff_form(pos, qty, ts_info, is_position=True)
                 st.session_state["sqp_id"] = None
+
+# ---- To run this page ----
+if __name__ == "__main__":
+    show()
