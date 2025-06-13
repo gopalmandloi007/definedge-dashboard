@@ -1,18 +1,40 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import requests
+from datetime import datetime, timedelta
 
-# ---- Yahan apne backend/API call lagaye ----
-def fetch_candles_definedge(symbol, interval, lookback=220):
-    """
-    Yahan aapko apne definedge API se data fetch karna hai.
-    symbol: e.g. "RELIANCE-EQ"
-    interval: "D" (daily), "W" (weekly), "M" (monthly)
-    return: DataFrame with columns ["Date", "Open", "High", "Low", "Close", "Volume"]
-    """
-    # Example stub, replace with actual API call:
-    # df = pd.read_json(requests.get(...).text)
-    raise NotImplementedError("fetch_candles_definedge ko apne API se connect karein.")
+# ---- Load your master file (symbol <-> token) ----
+# You should cache this for performance!
+@st.cache_data
+def load_master():
+    # Adjust path/columns as per your master file
+    # Example: columns=["token", "symbol", "segment"]
+    # Place master.csv in your project folder or provide full path
+    df = pd.read_csv("master.csv", dtype=str)
+    df.columns = [c.lower() for c in df.columns]
+    return df
+
+def get_token(symbol, segment, master_df):
+    symbol = symbol.strip().upper()
+    segment = segment.strip().upper()
+    row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
+    if not row.empty:
+        return row.iloc[0]['token']
+    return None
+
+def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
+    url = f"https://data.definedgesecurities.com/sds/history/{segment}/{token}/{timeframe}/{from_dt}/{to_dt}"
+    headers = {"Authorization": api_key}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code != 200:
+        raise Exception(f"API error: {resp.status_code} {resp.text}")
+    # For day/minute: Dateandtime, Open, High, Low, Close, Volume, OI
+    cols = ["Dateandtime", "Open", "High", "Low", "Close", "Volume", "OI"]
+    df = pd.read_csv(pd.compat.StringIO(resp.text), header=None, names=cols)
+    # Parse datetime
+    df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d-%m-%Y %H:%M")
+    return df
 
 def compute_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
@@ -47,48 +69,63 @@ def count_downdays(df, window=15):
             count += 1
     return count
 
-def show():
-    st.header("Symbol Technical Details")
+def get_time_range(days, endtime="1530"):
+    # Returns (from_dt, to_dt) in ddMMyyyyHHmm
+    to = datetime.now()
+    to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
+    frm = to - timedelta(days=days)
+    return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
 
-    symbol = st.text_input("Enter Symbol (e.g. RELIANCE-EQ):", value="RELIANCE-EQ")
-    if not symbol:
-        st.info("Please enter symbol above.")
+def show():
+    st.header("Symbol Technical Details (Definedge)")
+
+    api_key = st.secrets.get("integrate_api_session_key", "")
+    master_df = load_master()
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        segment = st.selectbox("Segment", sorted(master_df["segment"].str.upper().unique()), index=0)
+    with col2:
+        symbol = st.text_input("Symbol (e.g. RELIANCE-EQ)", value="RELIANCE-EQ").strip().upper()
+    with col3:
+        default_tf = st.selectbox("Show LTP and EMAs for", ["day", "minute"], index=0)
+
+    token = get_token(symbol, segment, master_df)
+    if not token:
+        st.warning("Symbol-token mapping not found in master file.")
         return
 
-    # --- Data Fetch & Calculation ---
     try:
-        with st.spinner("Fetching daily candles..."):
-            df_daily = fetch_candles_definedge(symbol, "D", lookback=220)
-        with st.spinner("Fetching weekly candles..."):
-            df_weekly = fetch_candles_definedge(symbol, "W", lookback=60)
-        with st.spinner("Fetching monthly candles..."):
-            df_monthly = fetch_candles_definedge(symbol, "M", lookback=24)
-    except NotImplementedError:
-        st.warning("fetch_candles_definedge() ko apne Definedge API se connect karein.")
+        # Daily candles: ~220 for 200 EMA + margin
+        from_dt, to_dt = get_time_range(220)
+        daily = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
+        # Weekly/monthly RSI: use 'day' data and resample
+        week_df = daily.copy().set_index("Date").resample("W").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
+        month_df = daily.copy().set_index("Date").resample("M").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
+    except Exception as e:
+        st.error(f"Error fetching candles: {e}")
         return
 
     # --- Indicators ---
-    df_daily["EMA20"] = compute_ema(df_daily["Close"], 20)
-    df_daily["EMA50"] = compute_ema(df_daily["Close"], 50)
-    df_daily["EMA200"] = compute_ema(df_daily["Close"], 200)
-    df_daily["RSI"] = compute_rsi(df_daily["Close"], 14)
-    df_weekly["RSI"] = compute_rsi(df_weekly["Close"], 14)
-    df_monthly["RSI"] = compute_rsi(df_monthly["Close"], 14)
+    daily["EMA20"] = compute_ema(daily["Close"], 20)
+    daily["EMA50"] = compute_ema(daily["Close"], 50)
+    daily["EMA200"] = compute_ema(daily["Close"], 200)
+    daily["RSI"] = compute_rsi(daily["Close"], 14)
+    week_df["RSI"] = compute_rsi(week_df["Close"], 14)
+    month_df["RSI"] = compute_rsi(month_df["Close"], 14)
 
-    # --- Latest Values ---
-    ltp = df_daily["Close"].iloc[-1]
-    ema20 = df_daily["EMA20"].iloc[-1]
-    ema50 = df_daily["EMA50"].iloc[-1]
-    ema200 = df_daily["EMA200"].iloc[-1]
-    rsi_daily = df_daily["RSI"].iloc[-1]
-    rsi_weekly = df_weekly["RSI"].iloc[-1]
-    rsi_monthly = df_monthly["RSI"].iloc[-1]
+    ltp = daily["Close"].iloc[-1]
+    ema20 = daily["EMA20"].iloc[-1]
+    ema50 = daily["EMA50"].iloc[-1]
+    ema200 = daily["EMA200"].iloc[-1]
+    rsi_daily = daily["RSI"].iloc[-1]
+    rsi_weekly = week_df["RSI"].iloc[-1]
+    rsi_monthly = month_df["RSI"].iloc[-1]
     ema20_ltp = ema20 / ltp if ltp else np.nan
     ema50_ema20 = ema50 / ema20 if ema20 else np.nan
-    updays = count_updays(df_daily, 15)
-    downdays = count_downdays(df_daily, 15)
+    updays = count_updays(daily, 15)
+    downdays = count_downdays(daily, 15)
 
-    # --- Display Panel ---
     colm = st.columns(3)
     with colm[0]:
         st.metric("Monthly RSI", f"{rsi_monthly:.2f}")
@@ -106,6 +143,6 @@ def show():
         st.metric("20 EMA / LTP", f"{ema20_ltp:.4f}")
 
     st.markdown("#### Recent Daily Candles")
-    st.dataframe(df_daily.tail(15)[["Date", "Open", "High", "Low", "Close", "EMA20", "EMA50", "EMA200", "RSI"]])
+    st.dataframe(daily.tail(15)[["Date", "Open", "High", "Low", "Close", "EMA20", "EMA50", "EMA200", "RSI"]])
 
-    st.info("Note: Yeh page aapke Definedge backend/API candles se kaam karega. fetch_candles_definedge() ko implement karein.")
+    st.info("All data is fetched from Definedge Historical Data API using your master file.")
