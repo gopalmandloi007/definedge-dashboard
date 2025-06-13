@@ -1,5 +1,9 @@
 import streamlit as st
 import importlib
+import os
+import streamlit as st
+
+st.write("Files in repo root:", os.listdir("."))
 
 st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 st.title("Definedge Integrate Dashboard")
