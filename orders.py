@@ -53,30 +53,29 @@ def show():
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
 
-    # Always get latest LTP for symbol/exchange
     ltp = 0.0
     if tradingsymbol and exchange:
         ltp = get_ltp(tradingsymbol, exchange, api_session_key)
+
     price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
 
     colQ, colA, colT, colD, colAMO = st.columns([2,2,2,2,2], gap="large")
 
-    # Amt/Qty logic with dynamic key for qty field
+    # Corrected: use price, not LTP, for auto qty
     if qty_or_amt == "Amt":
         with colA:
             amount = st.number_input("₹ Amt", min_value=0.0, step=100.0, key="amt", format="%.2f")
         with colQ:
-            qty_auto = int(amount // ltp) if (ltp > 0 and amount > 0) else 1
-            st.caption(f"Auto-Qty at LTP ₹{ltp:.2f}: {qty_auto}" if ltp > 0 and amount > 0 else "Auto-Qty: 1")
-            # Dynamic key for qty - ensures Streamlit resets qty default when amount or ltp changes
-            qty = st.number_input("Qty", min_value=1, value=qty_auto, step=1, key=f"qty_{amount}_{ltp}")
+            qty_auto = int(amount // price) if (price > 0 and amount > 0) else 1
+            st.caption(f"Auto-Qty at Price ₹{price:.2f}: {qty_auto}" if price > 0 and amount > 0 else "Auto-Qty: 1")
+            qty = st.number_input("Qty", min_value=1, value=qty_auto, step=1, key=f"qty_{amount}_{price}")
     else:
         with colQ:
             qty = st.number_input("Qty", min_value=1, value=1, step=1, key="qty")
         with colA:
             if ltp > 0:
                 st.caption(f"LTP: ₹{ltp:.2f}")
-            amount = qty * ltp if ltp > 0 else 0.0
+            amount = qty * price if price > 0 else 0.0
 
     with colT:
         trigger_price = st.number_input("Trig Price", min_value=0.0, value=0.0, step=0.05, key="tr_pr", format="%.2f")
