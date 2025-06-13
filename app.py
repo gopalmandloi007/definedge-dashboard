@@ -18,6 +18,7 @@ PAGES = {
     "Square Off": "squareoff",
     "Symbol Technical Details": "symbol_technical_details",
     "Definedge Batch Symbol Scanner": "definedge_batch_scan",
+    "Candlestick Demo": "simple_chart_demo",
     "Websocket Help": "websocket_help",
 }
 
