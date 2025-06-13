@@ -14,162 +14,178 @@ def get_ltp(tradingsymbol, exchange, api_session_key):
     return 0
 
 def show():
-    st.header("Broker Terminal - Place / Modify / Cancel Order")
-
     st.markdown("""
     <style>
-        .order-panel {
-            background-color: #f8f9fa;
-            border-radius: 10px;
-            padding: 20px 25px 10px 25px;
-            box-shadow: 0 2px 8px #d6d6d6;
-            margin-bottom: 24px;
-        }
-        .order-summary {
-            background-color: #e7f3ff;
-            border-radius: 8px;
-            padding: 16px;
-            margin-top: 16px;
-            font-size: 1.05rem;
-        }
-        .stRadio > label {
-            font-weight: 600;
-        }
+    .stApp {
+        max-width: 520px;
+        margin: auto;
+    }
+    .order-box {
+        background: #f8fafd;
+        border-radius: 10px;
+        box-shadow: 0 2px 6px #e0e8f0;
+        padding: 22px 18px 8px 18px;
+        margin: 0 0 16px 0;
+    }
+    .order-summary {
+        background: #e6f3ff;
+        border-radius: 7px;
+        padding: 12px 16px;
+        font-size: 0.99rem;
+        margin-bottom: 12px;
+    }
+    .order-btn {
+        width: 48%;
+        margin: 0 1%;
+        font-size: 1.02rem;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("### 🚀 Broker Terminal Order Entry")
+    st.markdown('<div class="order-box">', unsafe_allow_html=True)
+    st.header("Quick Order Placement", divider="rainbow")
 
+    col1, col2 = st.columns(2)
+    with col1:
+        tradingsymbol = st.text_input("Symbol", key="ts", placeholder="e.g. RELIANCE")
+    with col2:
+        exchange = st.selectbox("Exch", ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"], key="exch")
+
+    col3, col4 = st.columns(2)
+    with col3:
+        order_type = st.selectbox("Side", ["BUY", "SELL"], key="ot")
+    with col4:
+        product_type = st.selectbox("Product", ["CNC", "INTRADAY", "NORMAL"], key="prod")
+
+    col5, col6 = st.columns(2)
+    with col5:
+        price_type = st.selectbox("Type", ["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"], key="pt")
+    with col6:
+        validity = st.selectbox("Validity", ["DAY", "IOC", "EOS"], key="val")
+
+    amount = st.number_input("₹ Amount", min_value=0.0, value=0.0, step=100.0, key="amt", format="%.2f")
+
+    api_session_key = st.secrets.get("integrate_api_session_key", "")
+
+    ltp = 0.0
+    price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
+    if amount > 0 and tradingsymbol and exchange:
+        ltp = get_ltp(tradingsymbol, exchange, api_session_key)
+        if ltp > 0:
+            qty_auto = int(amount // ltp)
+            st.caption(f"Auto-Qty at LTP ₹{ltp:.2f}: {qty_auto}")
+        else:
+            st.warning("Could not fetch LTP. Enter qty manually.")
+            qty_auto = 1
+    else:
+        qty_auto = 1
+
+    qty = st.number_input("Quantity", min_value=1, value=qty_auto, step=1, key="qty")
+    trigger_price = st.number_input("Trigger Price", min_value=0.0, value=0.0, step=0.05, key="tr_pr", format="%.2f")
+    disclosed_quantity = st.number_input("Disclosed Qty", min_value=0, value=0, step=1, key="dis_qty")
+    amo = st.checkbox("After Market Order (AMO)?", key="amo")
+    remarks = st.text_input("Remarks (optional)", key="rem")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Preview summary
+    if tradingsymbol and qty and order_type and price_type:
+        st.markdown('<div class="order-summary">', unsafe_allow_html=True)
+        st.markdown(f"""
+        <b>Preview:</b> {order_type} {qty} x <b>{tradingsymbol}</b> @ ₹{price} ({price_type}, {product_type})<br>
+        Exch: {exchange} | Validity: {validity} | AMO: {"Yes" if amo else "No"}
+        """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Confirm popup logic
     if "order_confirm_popup" not in st.session_state:
         st.session_state.order_confirm_popup = False
     if "pending_order_data" not in st.session_state:
         st.session_state.pending_order_data = None
 
-    with st.form("place_order", clear_on_submit=False):
-        with st.container():
-            st.markdown('<div class="order-panel">', unsafe_allow_html=True)
-            tradingsymbol = st.text_input("Trading Symbol", key="ts")
-            exchange = st.radio("Exchange", ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"], horizontal=True, key="exch")
-            order_type = st.radio("Order Type", ["BUY", "SELL"], horizontal=True, key="ot")
-            price_type = st.radio("Price Type", ["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"], horizontal=True, key="pt")
-            product_type = st.radio("Product", ["CNC", "INTRADAY", "NORMAL"], horizontal=True, key="prod")
-            validity = st.radio("Validity", ["DAY", "EOS", "IOC"], horizontal=True, key="val")
-            amount = st.number_input("₹ Amount", min_value=0.0, value=0.0, step=100.0, key="amt")
-            api_session_key = st.secrets.get("integrate_api_session_key", "")
+    if st.button("Review & Place Order", use_container_width=True, type="primary"):
+        # Gather order data
+        data = {
+            "tradingsymbol": tradingsymbol,
+            "exchange": exchange,
+            "order_type": order_type,
+            "quantity": int(qty),
+            "price_type": price_type,
+            "price": float(price),
+            "product_type": product_type,
+            "validity": validity
+        }
+        if trigger_price:
+            data["trigger_price"] = float(trigger_price)
+        if remarks:
+            data["remarks"] = remarks
+        if disclosed_quantity:
+            data["disclosed_quantity"] = int(disclosed_quantity)
+        if amo:
+            data["amo"] = "Yes"
+        st.session_state.pending_order_data = data
+        st.session_state.order_confirm_popup = True
+        st.experimental_rerun()
 
-            ltp = 0.0
-            qty = 0
-            price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr")
-            if amount > 0 and tradingsymbol and exchange:
-                ltp = get_ltp(tradingsymbol, exchange, api_session_key)
-                if ltp > 0:
-                    qty = int(amount // ltp)
-                    st.markdown(f"Auto-calculated Qty at LTP ₹{ltp:.2f}: **{qty}**")
-                else:
-                    st.warning("Could not fetch LTP. Please enter qty manually.")
-
-            qty = st.number_input("Quantity", min_value=1, value=qty if qty > 0 else 1, step=1, key="qty")
-            trigger_price = st.number_input("Trigger Price", min_value=0.0, value=0.0, step=0.05, key="tr_pr")
-            disclosed_quantity = st.number_input("Disclosed Qty", min_value=0, value=0, step=1, key="dis_qty")
-            amo = st.checkbox("After Market Order (AMO)?", key="amo")
-            remarks = st.text_input("Remarks (optional)", key="rem")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        show_summary = tradingsymbol and qty and order_type and price_type
-        if show_summary:
-            st.markdown('<div class="order-summary">', unsafe_allow_html=True)
-            st.markdown(f"""
-            <b>Order Preview</b>  
-            <ul>
-                <li><b>Symbol:</b> {tradingsymbol}</li>
-                <li><b>Exchange:</b> {exchange}</li>
-                <li><b>Type:</b> <span style='color:{"green" if order_type=="BUY" else "red"}'>{order_type}</span></li>
-                <li><b>Product:</b> {product_type}</li>
-                <li><b>Qty:</b> {qty}</li>
-                <li><b>Price Type:</b> {price_type}</li>
-                <li><b>Price:</b> ₹{price}</li>
-                <li><b>Validity:</b> {validity}</li>
-                <li><b>Trigger Price:</b> {trigger_price}</li>
-                <li><b>Disclosed Qty:</b> {disclosed_quantity}</li>
-                <li><b>AMO:</b> {"Yes" if amo else "No"}</li>
-                <li><b>Remarks:</b> {remarks or "-"}</li>
-            </ul>
-            """, unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        submit = st.form_submit_button("Place Order")
-
-        if submit:
-            # Store order data and open confirmation popup
-            data = {
-                "tradingsymbol": tradingsymbol,
-                "exchange": exchange,
-                "order_type": order_type,
-                "quantity": int(qty),
-                "price_type": price_type,
-                "price": float(price),
-                "product_type": product_type,
-                "validity": validity
-            }
-            if trigger_price:
-                data["trigger_price"] = float(trigger_price)
-            if remarks:
-                data["remarks"] = remarks
-            if disclosed_quantity:
-                data["disclosed_quantity"] = int(disclosed_quantity)
-            if amo:
-                data["amo"] = "Yes"
-            st.session_state.pending_order_data = data
-            st.session_state.order_confirm_popup = True
-            st.experimental_rerun()
-
-    # Confirmation popup
+    # Popup confirmation
     if st.session_state.get("order_confirm_popup", False):
         st.markdown("""
         <style>
         .popup-bg {
             position: fixed;
             left: 0; top: 0; width: 100vw; height: 100vh;
-            background: rgba(0,0,0,0.3);
+            background: rgba(0,0,0,0.30);
             display: flex; align-items: center; justify-content: center;
             z-index: 99999;
         }
         .popup-content {
             background: #fff;
             border-radius: 12px;
-            padding: 32px 32px 12px 32px;
+            padding: 32px 24px 16px 24px;
             box-shadow: 0 2px 20px #888;
-            max-width: 400px;
-            width: 90%;
+            max-width: 340px;
+            width: 92%;
             text-align: center;
         }
         .popup-btn {
-            margin: 16px 18px 0 18px;
+            margin: 18px 12px 0 12px;
             min-width: 90px;
         }
         </style>
         """, unsafe_allow_html=True)
-        popup_code = """
+        st.markdown("""
         <div class="popup-bg">
             <div class="popup-content">
-                <h4>Confirm Order Submission</h4>
-                <p>Are you sure you want to place this order?</p>
+                <h4>Confirm Order Placement</h4>
+                <p>Place <b>{side}</b> {qty} x <b>{symb}</b> @ ₹{price}?</p>
+                <div style="margin-top:22px;">
+                    <form method="post">
+                        <button class="popup-btn" name="yes" type="submit" style="background:#2e8c2e;color:#fff;border:none;padding:7px 18px;border-radius:6px;">Yes</button>
+                        <button class="popup-btn" name="no" type="submit" style="background:#c22b2b;color:#fff;border:none;padding:7px 18px;border-radius:6px;">No</button>
+                    </form>
+                </div>
             </div>
         </div>
-        """
-        st.markdown(popup_code, unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Yes, Place Order", key="yes_place"):
+        """.format(
+            side=st.session_state.pending_order_data["order_type"],
+            qty=st.session_state.pending_order_data["quantity"],
+            symb=st.session_state.pending_order_data["tradingsymbol"],
+            price=st.session_state.pending_order_data["price"]
+        ), unsafe_allow_html=True)
+
+        # Real buttons
+        colc1, colc2 = st.columns(2)
+        with colc1:
+            if st.button("Yes, Place", key="yes_place"):
                 resp = integrate_post("/placeorder", st.session_state.pending_order_data)
                 st.success("Order submitted!")
                 st.json(resp)
                 st.session_state.order_confirm_popup = False
                 st.session_state.pending_order_data = None
                 st.experimental_rerun()
-        with col2:
-            if st.button("No, Modify", key="no_modify"):
+        with colc2:
+            if st.button("No, Edit", key="no_edit"):
                 st.session_state.order_confirm_popup = False
                 st.session_state.pending_order_data = None
-                st.info("Order Not Confirmed. Modify the fields above and resubmit.")
+                st.info("Order cancelled. You can edit order details.")
                 st.experimental_rerun()
