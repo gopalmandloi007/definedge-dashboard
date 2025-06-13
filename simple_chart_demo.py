@@ -22,7 +22,6 @@ def plot_candlestick(df, title="Candlestick Chart"):
 def show():
     st.header("Simple Candlestick Chart Demo")
 
-    # Sample data (replace with your own DataFrame)
     data = {
         'Date': pd.date_range(end=pd.Timestamp.today(), periods=30),
         'Open': pd.Series(range(30)) + 100,
