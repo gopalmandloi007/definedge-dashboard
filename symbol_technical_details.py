@@ -4,7 +4,6 @@ import numpy as np
 import requests
 import io
 from datetime import datetime, timedelta
-import plotly.graph_objs as go
 
 @st.cache_data
 def load_master():
@@ -77,88 +76,24 @@ def count_downdays(df, window=15):
 
 def get_time_range(days, endtime="1530"):
     to = datetime.now()
-    try:
-        to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
-    except Exception:
-        pass
+    to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
     frm = to - timedelta(days=days)
     return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
 
 def display_metric(label, value):
     st.metric(label, "N/A" if pd.isna(value) else f"{value:.2f}")
 
-def plot_candlestick(df, ema20=None, ema50=None, ema200=None, title="Daily Candlestick Chart"):
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df['Date'],
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        name='Candlestick'
-    ))
-    if ema20 is not None:
-        fig.add_trace(go.Scatter(
-            x=df['Date'], y=ema20,
-            mode='lines', name='EMA 20',
-            line=dict(width=1, color='blue')
-        ))
-    if ema50 is not None:
-        fig.add_trace(go.Scatter(
-            x=df['Date'], y=ema50,
-            mode='lines', name='EMA 50',
-            line=dict(width=1, color='orange')
-        ))
-    if ema200 is not None:
-        fig.add_trace(go.Scatter(
-            x=df['Date'], y=ema200,
-            mode='lines', name='EMA 200',
-            line=dict(width=1, color='green')
-        ))
-    fig.update_layout(
-        xaxis_rangeslider_visible=False,
-        title=title,
-        height=500,
-        margin=dict(l=10, r=10, t=30, b=10)
-    )
-    return fig
-
-def plot_rsi(df, title="RSI"):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df['Date'], y=df['RSI'],
-        mode='lines', name='RSI',
-        line=dict(width=1.5, color='purple')
-    ))
-    fig.add_hline(y=70, line=dict(dash='dash', color='red'), annotation_text="Overbought", annotation_position="top right")
-    fig.add_hline(y=30, line=dict(dash='dash', color='green'), annotation_text="Oversold", annotation_position="bottom right")
-    fig.update_layout(
-        title=title,
-        height=250,
-        yaxis=dict(range=[0, 100]),
-        margin=dict(l=10, r=10, t=30, b=10)
-    )
-    return fig
-
 def show():
     st.header("Symbol Technical Details (Definedge)")
 
     api_key = st.secrets.get("integrate_api_session_key", "")
-    if not api_key:
-        st.error("API key not found. Please add integrate_api_session_key in Streamlit secrets.")
-        return
-
-    try:
-        master_df = load_master()
-    except Exception as e:
-        st.error(f"Error loading master.csv: {e}")
-        return
+    master_df = load_master()
 
     col1, col2, col3 = st.columns(3)
     with col1:
         segment = st.selectbox("Segment", sorted(master_df["segment"].str.upper().unique()), index=0)
     with col2:
-        symbol = st.text_input("Symbol (e.g. RELIANCE-EQ)", value="RELIANCE-EQ").strip().upper()
+        symbol = st.text_input("Symbol (e.g. RELIANCE or RELIANCE-EQ)", value="RELIANCE-EQ").strip().upper()
     with col3:
         st.caption("EMAs/RSI are for daily timeframe.")
 
@@ -188,9 +123,19 @@ def show():
     ema50 = daily["EMA50"].iloc[-1]
     ema200 = daily["EMA200"].iloc[-1]
 
-    rsi_daily = daily["RSI"].dropna().iloc[-1] if daily["RSI"].notna().any() else np.nan
-    rsi_weekly = week_df["RSI"].dropna().iloc[-1] if week_df["RSI"].notna().any() else np.nan
-    rsi_monthly = month_df["RSI"].dropna().iloc[-1] if month_df["RSI"].notna().any() else np.nan
+    # Show most recent valid RSI for each timeframe, or N/A
+    if daily["RSI"].notna().any():
+        rsi_daily = daily["RSI"].dropna().iloc[-1]
+    else:
+        rsi_daily = np.nan
+    if week_df["RSI"].notna().any():
+        rsi_weekly = week_df["RSI"].dropna().iloc[-1]
+    else:
+        rsi_weekly = np.nan
+    if month_df["RSI"].notna().any():
+        rsi_monthly = month_df["RSI"].dropna().iloc[-1]
+    else:
+        rsi_monthly = np.nan
 
     ema20_ltp = ema20 / ltp if ltp else np.nan
     ema50_ema20 = ema50 / ema20 if ema20 else np.nan
@@ -213,25 +158,7 @@ def show():
         st.metric("200 EMA", f"{ema200:.2f}")
         st.metric("20 EMA / LTP", f"{ema20_ltp:.4f}")
 
-    st.markdown("#### Daily Candlestick Chart")
-    st.plotly_chart(
-        plot_candlestick(
-            daily.tail(60),
-            ema20=daily["EMA20"].tail(60),
-            ema50=daily["EMA50"].tail(60),
-            ema200=daily["EMA200"].tail(60)
-        ),
-        use_container_width=True
-    )
-
-    st.markdown("#### Daily RSI Chart")
-    st.plotly_chart(plot_rsi(daily.tail(90)), use_container_width=True)
-
     st.markdown("#### Recent Daily Candles")
     st.dataframe(daily.tail(15)[["Date", "Open", "High", "Low", "Close", "EMA20", "EMA50", "EMA200", "RSI"]])
 
     st.info("All data is fetched from Definedge Historical Data API using your master file.")
-
-    # Optionally: CSV Download
-    csv = daily.to_csv(index=False)
-    st.download_button("Download Daily Data as CSV", csv, "daily_data.csv")
