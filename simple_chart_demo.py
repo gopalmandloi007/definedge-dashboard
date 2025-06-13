@@ -39,7 +39,12 @@ def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
     df = df.dropna(subset=["Date"])
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
+    # Debug info:
+    debug_info = {
+        "api_response_lines": resp.text.split('\n')[:5],
+        "date_parsed": df[["Dateandtime", "Date"]].head(15),
+    }
+    return df, debug_info
 
 def get_time_range(days, endtime="1530"):
     to = datetime.now()
@@ -67,8 +72,9 @@ def show():
         return
 
     from_dt, to_dt = get_time_range(120)
+    st.write("From:", from_dt, "To:", to_dt)
     try:
-        df = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
+        df, debug_info = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
     except Exception as e:
         st.error(f"Error fetching candles: {e}")
         return
@@ -76,6 +82,10 @@ def show():
     if df.empty:
         st.warning("No data fetched for this symbol.")
         return
+
+    # Debug info:
+    st.write("API Response first 5 lines:", debug_info["api_response_lines"])
+    st.write(debug_info["date_parsed"])
 
     df = df.sort_values("Date")
     chart_df = df.tail(60)
@@ -98,6 +108,5 @@ def show():
 
     st.info("Candlestick chart is live from Definedge API and master file.")
 
-# Run the app (for Streamlit Cloud or local)
 if __name__ == "__main__":
     show()
