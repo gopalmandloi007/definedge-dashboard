@@ -1,11 +1,12 @@
 import streamlit as st
 import importlib
 import os
-import streamlit as st
 
+st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")  # <-- MUST be first
+
+# Debug: print files in repo root
 st.write("Files in repo root:", os.listdir("."))
 
-st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 st.title("Definedge Integrate Dashboard")
 
 PAGES = {
@@ -17,8 +18,8 @@ PAGES = {
     "Limits": "limits",
     "Margin": "margin",
     "Quotes": "quotes",
-    "GTT order manage": "gtt",           # Was "GTT"
-    "GTT Order Place": "gtt_oco_manage", # Was "GTT/OCO Manage"
+    "GTT order manage": "gtt",
+    "GTT Order Place": "gtt_oco_manage",
     "Square Off": "squareoff",
     "Symbol Technical Details": "symbol_technical_details",
     "Definedge Batch Symbol Scanner": "definedge_batch_scan",
