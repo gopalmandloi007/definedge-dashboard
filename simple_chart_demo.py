@@ -4,7 +4,7 @@ import numpy as np
 import requests
 import io
 from datetime import datetime, timedelta
-import plotly.graph_objs as go  # <-- Candlestick chart ke liye
+import plotly.graph_objs as go
 
 @st.cache_data
 def load_master():
@@ -42,130 +42,44 @@ def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
-def compute_ema(series, period):
-    return series.ewm(span=period, adjust=False).mean()
-
-def compute_rsi(series, period=14):
-    delta = series.diff()
-    gain = np.where(delta > 0, delta, 0)
-    loss = np.where(delta < 0, -delta, 0)
-    avg_gain = pd.Series(gain).rolling(window=period, min_periods=period).mean()
-    avg_loss = pd.Series(loss).rolling(window=period, min_periods=period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return pd.Series(rsi, index=series.index)
-
-def count_updays(df, window=15):
-    highs = df["High"].values
-    count = 0
-    for i in range(-window, 0):
-        if i - 1 < -len(highs):
-            continue
-        if highs[i] > highs[i-1]:
-            count += 1
-    return count
-
-def count_downdays(df, window=15):
-    lows = df["Low"].values
-    count = 0
-    for i in range(-window, 0):
-        if i - 1 < -len(lows):
-            continue
-        if lows[i] < lows[i-1]:
-            count += 1
-    return count
-
 def get_time_range(days, endtime="1530"):
     to = datetime.now()
     to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
     frm = to - timedelta(days=days)
     return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
 
-def display_metric(label, value):
-    st.metric(label, "N/A" if pd.isna(value) else f"{value:.2f}")
-
 def show():
-    st.header("Symbol Technical Details (Definedge)")
+    st.header("Simple Candlestick Demo (Definedge API)")
 
     api_key = st.secrets.get("integrate_api_session_key", "")
     master_df = load_master()
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         segment = st.selectbox("Segment", sorted(master_df["segment"].str.upper().unique()), index=0)
     with col2:
-        symbol = st.text_input("Symbol (e.g. RELIANCE or RELIANCE-EQ)", value="RELIANCE-EQ").strip().upper()
-    with col3:
-        st.caption("EMAs/RSI are for daily timeframe.")
+        # Symbol dropdown for selected segment
+        symbol_list = master_df[master_df["segment"] == segment]["symbol"].unique()
+        symbol = st.selectbox("Symbol", sorted(symbol_list), index=0)
 
     token = get_token(symbol, segment, master_df)
     if not token:
-        st.warning("Symbol-token mapping not found in master file. Try exact symbol or instrument code.")
+        st.error("Symbol-token mapping not found in master file. Try another symbol.")
         return
 
+    from_dt, to_dt = get_time_range(120)
     try:
-        from_dt, to_dt = get_time_range(420)
-        daily = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
-        week_df = daily.copy().set_index("Date").resample("W").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
-        month_df = daily.copy().set_index("Date").resample("M").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
+        df = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
     except Exception as e:
         st.error(f"Error fetching candles: {e}")
         return
 
-    daily["EMA20"] = compute_ema(daily["Close"], 20)
-    daily["EMA50"] = compute_ema(daily["Close"], 50)
-    daily["EMA200"] = compute_ema(daily["Close"], 200)
-    daily["RSI"] = compute_rsi(daily["Close"], 14)
-    week_df["RSI"] = compute_rsi(week_df["Close"], 14)
-    month_df["RSI"] = compute_rsi(month_df["Close"], 14)
+    if df.empty:
+        st.warning("No data fetched for this symbol.")
+        return
 
-    ltp = daily["Close"].iloc[-1]
-    ema20 = daily["EMA20"].iloc[-1]
-    ema50 = daily["EMA50"].iloc[-1]
-    ema200 = daily["EMA200"].iloc[-1]
-
-    # Show most recent valid RSI for each timeframe, or N/A
-    if daily["RSI"].notna().any():
-        rsi_daily = daily["RSI"].dropna().iloc[-1]
-    else:
-        rsi_daily = np.nan
-    if week_df["RSI"].notna().any():
-        rsi_weekly = week_df["RSI"].dropna().iloc[-1]
-    else:
-        rsi_weekly = np.nan
-    if month_df["RSI"].notna().any():
-        rsi_monthly = month_df["RSI"].dropna().iloc[-1]
-    else:
-        rsi_monthly = np.nan
-
-    ema20_ltp = ema20 / ltp if ltp else np.nan
-    ema50_ema20 = ema50 / ema20 if ema20 else np.nan
-    updays = count_updays(daily, 15)
-    downdays = count_downdays(daily, 15)
-
-    colm = st.columns(3)
-    with colm[0]:
-        display_metric("Monthly RSI", rsi_monthly)
-        st.metric("LTP", f"{ltp:.2f}")
-        st.metric("20 EMA", f"{ema20:.2f}")
-        st.metric("Updays (15d)", updays)
-    with colm[1]:
-        display_metric("Weekly RSI", rsi_weekly)
-        st.metric("50 EMA", f"{ema50:.2f}")
-        st.metric("50 EMA / 20 EMA", f"{ema50_ema20:.4f}")
-        st.metric("Downdays (15d)", downdays)
-    with colm[2]:
-        display_metric("Daily RSI", rsi_daily)
-        st.metric("200 EMA", f"{ema200:.2f}")
-        st.metric("20 EMA / LTP", f"{ema20_ltp:.4f}")
-
-    st.markdown("#### Recent Daily Candles")
-    st.dataframe(daily.tail(15)[["Date", "Open", "High", "Low", "Close", "EMA20", "EMA50", "EMA200", "RSI"]])
-
-    # ---- Candlestick Chart Section ----
-    st.markdown("#### Candlestick Chart (Last 60 Days)")
-
-    chart_df = daily.tail(60)
+    df = df.sort_values("Date")
+    chart_df = df.tail(60)
     fig = go.Figure(data=[go.Candlestick(
         x=chart_df["Date"],
         open=chart_df["Open"],
@@ -177,9 +91,10 @@ def show():
     fig.update_layout(
         height=400,
         margin=dict(l=10, r=10, t=30, b=10),
-        xaxis_rangeslider_visible=False
+        xaxis_rangeslider_visible=False,
+        title=f"{symbol} Candlestick Chart"
     )
     st.plotly_chart(fig, use_container_width=True)
-    # ---- End Candlestick Chart Section ----
+    st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
 
-    st.info("All data is fetched from Definedge Historical Data API using your master file.")
+    st.info("Candlestick chart is live from Definedge API and master file.")
