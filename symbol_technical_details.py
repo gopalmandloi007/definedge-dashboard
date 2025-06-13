@@ -4,23 +4,40 @@ import numpy as np
 import requests
 from datetime import datetime, timedelta
 
-# ---- Load your master file (symbol <-> token) ----
-# You should cache this for performance!
 @st.cache_data
 def load_master():
-    # Adjust path/columns as per your master file
-    # Example: columns=["token", "symbol", "segment"]
-    # Place master.csv in your project folder or provide full path
-    df = pd.read_csv("master.csv", dtype=str)
-    df.columns = [c.lower() for c in df.columns]
-    return df
+    # Your master is tab-separated, no header in file, so set names
+    df = pd.read_csv("master.csv", sep="\t", header=None)
+    df.columns = [
+        "segment",      # 0
+        "token",        # 1
+        "symbol",       # 2
+        "instrument",   # 3
+        "series",       # 4
+        "isin1",        # 5
+        "facevalue",    # 6
+        "lot",          # 7
+        "something",    # 8
+        "zero1",        # 9
+        "two1",         #10
+        "one1",         #11
+        "isin",         #12
+        "one2"          #13
+    ]
+    # Only keep needed columns for lookup
+    return df[["segment", "token", "symbol", "instrument"]]
 
 def get_token(symbol, segment, master_df):
     symbol = symbol.strip().upper()
     segment = segment.strip().upper()
+    # Try match on 'symbol'
     row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
     if not row.empty:
         return row.iloc[0]['token']
+    # Else, try match on 'instrument' for cases like RELIANCE-EQ
+    row2 = master_df[(master_df['instrument'] == symbol) & (master_df['segment'] == segment)]
+    if not row2.empty:
+        return row2.iloc[0]['token']
     return None
 
 def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
@@ -86,27 +103,25 @@ def show():
     with col1:
         segment = st.selectbox("Segment", sorted(master_df["segment"].str.upper().unique()), index=0)
     with col2:
-        symbol = st.text_input("Symbol (e.g. RELIANCE-EQ)", value="RELIANCE-EQ").strip().upper()
+        symbol = st.text_input("Symbol (e.g. RELIANCE or RELIANCE-EQ)", value="RELIANCE-EQ").strip().upper()
     with col3:
-        default_tf = st.selectbox("Show LTP and EMAs for", ["day", "minute"], index=0)
+        st.caption("EMAs/RSI are for daily timeframe.")
 
     token = get_token(symbol, segment, master_df)
     if not token:
-        st.warning("Symbol-token mapping not found in master file.")
+        st.warning("Symbol-token mapping not found in master file. Try exact symbol or instrument code.")
         return
 
     try:
-        # Daily candles: ~220 for 200 EMA + margin
         from_dt, to_dt = get_time_range(220)
         daily = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
-        # Weekly/monthly RSI: use 'day' data and resample
+        # Resample for week/month
         week_df = daily.copy().set_index("Date").resample("W").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
         month_df = daily.copy().set_index("Date").resample("M").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
     except Exception as e:
         st.error(f"Error fetching candles: {e}")
         return
 
-    # --- Indicators ---
     daily["EMA20"] = compute_ema(daily["Close"], 20)
     daily["EMA50"] = compute_ema(daily["Close"], 50)
     daily["EMA200"] = compute_ema(daily["Close"], 200)
