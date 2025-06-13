@@ -15,6 +15,7 @@ def generate_session_key():
     }
     try:
         response = requests.post(api_url, json=payload, timeout=10)
+        st.write("Raw response text:", response.text)   # <--- DEBUG print
         data = response.json()
         if data.get("status") == "SUCCESS" and "session_key" in data:
             st.session_state["session_key"] = data["session_key"]
@@ -68,7 +69,6 @@ def api_call_with_auto_refresh(url, payload=None, headers=None, method="GET"):
             return None
     return data
 
-# --- Add this show() function below for Streamlit menu integration ---
 def show():
     st.header("Login & Session Key")
     if st.button("Generate Session Key / Login"):
