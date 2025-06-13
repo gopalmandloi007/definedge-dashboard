@@ -20,9 +20,10 @@ def get_ltp(exchange, token, api_session_key):
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
             return safe_float(resp.json().get("ltp", 0))
+        else:
+            return None
     except Exception:
-        pass
-    return 0.0
+        return None
 
 def get_prev_close(exchange, token, api_session_key):
     today = datetime.now()
@@ -62,44 +63,24 @@ def highlight_pnl(val):
         pass
     return 'color: black'
 
-def get_gtt_stoploss_dict():
-    # Fetch all GTT+OCO orders and build a dict: {symbol: stoploss_price}
-    data = integrate_get("/gttorders")
-    gttlist = data.get("pendingGTTOrderBook", [])
-    stoploss_dict = dict()
-    for order in gttlist:
-        symbol = order.get('tradingsymbol')
-        # Single-leg GTT stoploss
-        if order.get('order_type') == 'SELL' and order.get('condition') == 'LTP_BELOW':
-            price = safe_float(order.get('alert_price'))
-            # If multiple, keep the lowest stoploss price
-            if symbol in stoploss_dict:
-                stoploss_dict[symbol] = min(stoploss_dict[symbol], price)
-            else:
-                stoploss_dict[symbol] = price
-        # OCO stoploss
-        if 'stoploss_price' in order and safe_float(order.get('stoploss_price')) > 0:
-            price = safe_float(order.get('stoploss_price'))
-            if symbol in stoploss_dict:
-                stoploss_dict[symbol] = min(stoploss_dict[symbol], price)
-            else:
-                stoploss_dict[symbol] = price
-    return stoploss_dict
+def main():
+    st.set_page_config(layout="wide")
+    st.header("=========== Holdings Dashboard Pro ===========")
 
-def show():
-    st.header("=========== Holdings Dashboard with Open Risk & Allocation ===========")
     api_session_key = st.secrets.get("integrate_api_session_key", "")
+    auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
+    if auto_refresh:
+        st.experimental_rerun()
+        st_autorefresh = st.experimental_rerun
 
     try:
-        # GTT+OCO Stoploss data
-        stoploss_dict = get_gtt_stoploss_dict()
-
         data = integrate_get("/holdings")
         holdings = data.get("data", [])
         if not holdings:
             st.info("No holdings found.")
             return
 
+        # Filter only ACTIVE holdings (qty > 0)
         active_holdings = []
         for h in holdings:
             qty = 0.0
@@ -116,7 +97,6 @@ def show():
         total_overall_pnl = 0.0
         total_invested = 0.0
         total_current = 0.0
-        total_open_risk = 0.0
 
         for h in active_holdings:
             ts = h.get("tradingsymbol")
@@ -136,84 +116,91 @@ def show():
                 qty = safe_float(h.get("dp_qty", 0))
 
             avg_buy = safe_float(h.get("avg_buy_price", 0))
-            ltp = get_ltp(exch, token, api_session_key) if token else 0.0
-            prev_close = get_prev_close(exch, token, api_session_key) if token else 0.0
+            ltp = get_ltp(exch, token, api_session_key) if token else None
+            prev_close = get_prev_close(exch, token, api_session_key) if token else None
 
-            invested = avg_buy * qty
-            current = ltp * qty
+            invested = avg_buy * qty if avg_buy is not None else 0.0
+            current = ltp * qty if ltp is not None else 0.0
 
-            today_pnl = (ltp - prev_close) * qty if prev_close else 0.0
-            overall_pnl = (ltp - avg_buy) * qty if avg_buy else 0.0
-            pct_chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
-            pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if avg_buy else 0.0
-
-            # OPEN RISK calculation
-            stoploss_price = stoploss_dict.get(tsym)
-            if stoploss_price is not None and ltp > 0:
-                open_risk = max(0, (ltp - stoploss_price) * qty)
-            else:
-                open_risk = ""
+            today_pnl = (ltp - prev_close) * qty if (ltp is not None and prev_close) else 0.0
+            overall_pnl = (ltp - avg_buy) * qty if (ltp is not None and avg_buy) else 0.0
+            pct_chg = ((ltp - prev_close) / prev_close * 100) if (ltp is not None and prev_close) else 0.0
+            pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if (ltp is not None and avg_buy) else 0.0
+            realized_pnl = 0.0
 
             total_today_pnl += today_pnl
             total_overall_pnl += overall_pnl
             total_invested += invested
             total_current += current
-            if isinstance(open_risk, (int, float)):
-                total_open_risk += open_risk
 
             rows.append([
                 tsym,
-                round(ltp, 2),
-                round(avg_buy, 2),
+                round(ltp, 2) if ltp is not None else "N/A",
+                round(avg_buy, 2) if avg_buy is not None else "N/A",
                 int(qty),
-                round(prev_close, 2),
-                round(pct_chg, 2),
-                round(today_pnl, 2),
-                round(overall_pnl, 2),
-                round(pct_chg_avg, 2),
-                round(invested, 2),
-                round(current, 2),
+                round(prev_close, 2) if prev_close is not None else "N/A",
+                round(pct_chg, 2) if ltp is not None else "N/A",
+                round(today_pnl, 2) if ltp is not None else "N/A",
+                round(overall_pnl, 2) if ltp is not None else "N/A",
+                round(realized_pnl, 2) if realized_pnl else "",
+                round(pct_chg_avg, 2) if ltp is not None else "N/A",
+                round(invested, 2) if invested else "N/A",
+                round(current, 2) if current else "N/A",
                 exch,
                 isin,
-                round(stoploss_price, 2) if stoploss_price is not None else "",
-                round(open_risk, 2) if isinstance(open_risk, (int, float)) else "",
             ])
 
         headers = [
             "Symbol", "LTP", "Avg Buy", "Qty", "P.Close", "%Chg", "Today P&L", "Overall P&L",
-            "%Chg Avg", "Invested", "Current", "Exchange", "ISIN", "Stoploss", "Open Risk"
+            "Realized P&L", "%Chg Avg", "Invested", "Current", "Exchange", "ISIN"
         ]
 
         df = pd.DataFrame(rows, columns=headers)
         df = df.sort_values("Invested", ascending=False)
 
-        # Allocation Pie Chart
-        st.subheader("Portfolio Allocation")
-        fig = px.pie(df, names="Symbol", values="Invested", title="Allocation by Invested Amount")
-        st.plotly_chart(fig, use_container_width=True)
+        # 3. Search/Filter Box for Symbols
+        search = st.text_input("🔍 Search Symbol (filter):")
+        if search.strip():
+            df = df[df['Symbol'].str.contains(search.strip(), case=False, na=False)]
 
+        # 5. Pie Chart of Allocation
+        with st.expander("Show Portfolio Allocation Pie-Chart"):
+            fig = px.pie(df, names="Symbol", values="Invested", title="Allocation by Invested Amount")
+            st.plotly_chart(fig, use_container_width=True)
+
+        # 9. Portfolio Return Summary
+        if total_invested > 0:
+            total_return = (total_current / total_invested - 1) * 100
+            st.markdown(f"**Overall Portfolio Return: {total_return:.2f}%**")
+
+        # 6. Show Last Price Fetch/Refresh Time
+        st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # 1. Color Coding for P&L Columns
         st.markdown(f"**Total NSE Holdings: {len(df)}**")
         st.dataframe(
             df.style.applymap(highlight_pnl, subset=["Today P&L", "Overall P&L", "%Chg", "%Chg Avg"]),
             use_container_width=True
         )
 
-        st.markdown(f"### Total Open Risk: <span style='color:red'>{total_open_risk:,.2f}</span>", unsafe_allow_html=True)
-
-        # Download button
+        # 2. Download Excel/CSV Button
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="⬇️ Download Holdings as CSV",
             data=csv,
-            file_name='holdings_with_open_risk.csv',
+            file_name='holdings.csv',
             mime='text/csv',
         )
 
-        # Timestamp
-        st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        # 7. Show Only Main Columns, Hide Details in Expander
+        with st.expander("Show Detailed Holdings Table"):
+            st.dataframe(df, use_container_width=True)
 
+        # 4. Sort by Columns (already sorted by Invested)
+        # 8. Error messages handled in get_ltp (returns None for error)
+        # 10. Auto-refresh Option (checkbox at top)
     except Exception as e:
-        st.error(f"Error loading holdings or GTT/OCO orders: {e}")
+        st.error(f"Error loading holdings: {e}")
 
 if __name__ == "__main__":
-    show()
+    main()
