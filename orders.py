@@ -55,21 +55,20 @@ def show():
 
     # Always get latest LTP for symbol/exchange
     ltp = 0.0
-    price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
     if tradingsymbol and exchange:
         ltp = get_ltp(tradingsymbol, exchange, api_session_key)
+    price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
 
-    # Second row: Qty/Amt, Trig Price, Disc Qty, AMO
     colQ, colA, colT, colD, colAMO = st.columns([2,2,2,2,2], gap="large")
 
-    # --- FIXED LOGIC: Dynamic key for qty box in "Amt" mode so it always resets correctly ---
+    # Amt/Qty logic with dynamic key for qty field
     if qty_or_amt == "Amt":
         with colA:
             amount = st.number_input("₹ Amt", min_value=0.0, step=100.0, key="amt", format="%.2f")
         with colQ:
             qty_auto = int(amount // ltp) if (ltp > 0 and amount > 0) else 1
             st.caption(f"Auto-Qty at LTP ₹{ltp:.2f}: {qty_auto}" if ltp > 0 and amount > 0 else "Auto-Qty: 1")
-            # Dynamic key: the qty box resets whenever amount or LTP changes
+            # Dynamic key for qty - ensures Streamlit resets qty default when amount or ltp changes
             qty = st.number_input("Qty", min_value=1, value=qty_auto, step=1, key=f"qty_{amount}_{ltp}")
     else:
         with colQ:
