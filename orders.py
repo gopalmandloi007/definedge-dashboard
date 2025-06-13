@@ -16,10 +16,7 @@ def get_ltp(tradingsymbol, exchange, api_session_key):
 def show():
     st.markdown("""
     <style>
-    .stApp {
-        max-width: 950px;
-        margin: auto;
-    }
+    .stApp { max-width: 950px; margin: auto; }
     .order-box {
         background: #f8fafd;
         border-radius: 10px;
@@ -52,31 +49,44 @@ def show():
         order_type = st.selectbox("Side", ["BUY", "SELL"], key="ot")
         product_type = st.selectbox("Product", ["CNC", "INTRADAY", "NORMAL"], key="prod")
     with col4:
-        amount = st.number_input("₹ Amt", min_value=0.0, value=0.0, step=100.0, key="amt", format="%.2f")
-        price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
+        qty_or_amt = st.radio("Order By", ["Qty", "Amt"], horizontal=True, key="qty_or_amt")
+        qty_default = 1
+        amt_default = 0.0
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
 
+    # Amount/Qty input logic
     ltp = 0.0
-    qty_auto = 1
-    if amount > 0 and tradingsymbol and exchange:
+    qty = qty_default
+    amount = amt_default
+    price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
+    if tradingsymbol and exchange:
         ltp = get_ltp(tradingsymbol, exchange, api_session_key)
-        if ltp > 0:
-            qty_auto = int(amount // ltp)
-            st.caption(f"Auto-Qty at LTP ₹{ltp:.2f}: {qty_auto}")
-        else:
-            st.caption("LTP fetch failed, enter qty manually.")
+    colQ, colA, colT, colD, colAMO = st.columns([2,2,2,2,2], gap="large")
+    if qty_or_amt == "Amt":
+        with colA:
+            amount = st.number_input("₹ Amt", min_value=0.0, value=0.0, step=100.0, key="amt", format="%.2f")
+        with colQ:
+            if ltp > 0 and amount > 0:
+                qty_auto = int(amount // ltp)
+                st.caption(f"Auto-Qty at LTP ₹{ltp:.2f}: {qty_auto}")
+            else:
+                qty_auto = qty_default
+            qty = st.number_input("Qty", min_value=1, value=qty_auto, step=1, key="qty")
+    else:
+        with colQ:
+            qty = st.number_input("Qty", min_value=1, value=qty_default, step=1, key="qty")
+        with colA:
+            if ltp > 0:
+                st.caption(f"LTP: ₹{ltp:.2f}")
+            amount = qty * ltp if ltp > 0 else 0.0
 
-    colQ, colT, colD, colA = st.columns([2,2,2,2], gap="large")
-    with colQ:
-        qty = st.number_input("Qty", min_value=1, value=qty_auto, step=1, key="qty")
     with colT:
         trigger_price = st.number_input("Trig Price", min_value=0.0, value=0.0, step=0.05, key="tr_pr", format="%.2f")
     with colD:
         disclosed_quantity = st.number_input("Disc Qty", min_value=0, value=0, step=1, key="dis_qty")
-    with colA:
+    with colAMO:
         amo = st.checkbox("AMO?", key="amo")
-    
     remarks = st.text_input("Remarks (optional)", key="rem")
 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -86,7 +96,8 @@ def show():
         st.markdown('<div class="order-summary">', unsafe_allow_html=True)
         st.markdown(
             f"<b>Preview:</b> {order_type} {qty} x <b>{tradingsymbol}</b> @ ₹{price} ({price_type}, {product_type})<br>"
-            f"Exch: {exchange} | Validity: {validity} | AMO: {'Yes' if amo else 'No'}",
+            f"Exch: {exchange} | Validity: {validity} | AMO: {'Yes' if amo else 'No'}<br>"
+            f"Order By: <b>{qty_or_amt}</b> | ₹ Amt: <b>{amount:.2f}</b>",
             unsafe_allow_html=True
         )
         st.markdown('</div>', unsafe_allow_html=True)
