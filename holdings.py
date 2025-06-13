@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from utils import integrate_get
+import plotly.express as px
 
 def safe_float(val):
     try:
@@ -50,8 +51,19 @@ def get_prev_close(exchange, token, api_session_key):
         pass
     return 0.0
 
+def highlight_pnl(val):
+    try:
+        val = float(val)
+        if val > 0:
+            return 'color: green'
+        elif val < 0:
+            return 'color: red'
+    except:
+        pass
+    return 'color: black'
+
 def show():
-    st.header("=========== Holdings ===========")
+    st.header("=========== Holdings Dashboard (Pro) ===========")
     api_session_key = st.secrets.get("integrate_api_session_key", "")
 
     try:
@@ -61,7 +73,7 @@ def show():
             st.info("No holdings found.")
             return
 
-        # ❗ Filter only ACTIVE holdings (qty > 0)
+        # Filter only ACTIVE holdings (qty > 0)
         active_holdings = []
         for h in holdings:
             qty = 0.0
@@ -149,7 +161,19 @@ def show():
         ]
 
         df = pd.DataFrame(rows, columns=headers)
+        df = df.sort_values("Invested", ascending=False)
 
+        # --- FILTER ---
+        search = st.text_input("🔍 Search Symbol (filter):")
+        if search.strip():
+            df = df[df['Symbol'].str.contains(search.strip(), case=False, na=False)]
+
+        # Pie Chart
+        st.subheader("Portfolio Allocation")
+        fig = px.pie(df, names="Symbol", values="Invested", title="Allocation by Invested Amount")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # P&L Summary
         st.markdown("""
 | Summary         | Amount        | Total Invested value | Total current value |
 |-----------------|--------------|----------------------|---------------------|
@@ -158,8 +182,32 @@ def show():
         """.format(total_today_pnl, total_invested, total_current, total_overall_pnl)
         )
 
+        # Portfolio Return %
+        if total_invested > 0:
+            total_return = (total_current / total_invested - 1) * 100
+            st.markdown(f"**Overall Portfolio Return: {total_return:.2f}%**")
+
+        # Timestamp
+        st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # Show table with color styling
         st.markdown(f"**Total NSE Holdings: {len(df)}**")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(
+            df.style.applymap(highlight_pnl, subset=["Today P&L", "Overall P&L", "%Chg", "%Chg Avg"]),
+            use_container_width=True
+        )
+
+        # Download button
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="⬇️ Download Holdings as CSV",
+            data=csv,
+            file_name='holdings.csv',
+            mime='text/csv',
+        )
 
     except Exception as e:
         st.error(f"Error loading holdings: {e}")
+
+if __name__ == "__main__":
+    show()
