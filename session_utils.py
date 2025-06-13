@@ -7,15 +7,17 @@ SESSION_KEY_VALIDITY_SECONDS = 3000  # 50 minutes
 def generate_session_key():
     client_code = st.secrets["CLIENT_CODE"]
     password = st.secrets["PASSWORD"]
-    api_url = "https://api.definedge.com/session"  # Change if your endpoint differs
+    # NOTE: Change this URL if your actual endpoint is different
+    api_url = "https://api.definedge.com/session"
 
     payload = {
         "clientcode": client_code,
         "password": password
     }
     try:
+        # Try POST first
         response = requests.post(api_url, json=payload, timeout=10)
-        st.write("Raw response text:", response.text)   # <--- DEBUG print
+        st.write("Raw response text:", response.text)  # Debug print, please check this in Streamlit UI!
         data = response.json()
         if data.get("status") == "SUCCESS" and "session_key" in data:
             st.session_state["session_key"] = data["session_key"]
@@ -71,13 +73,17 @@ def api_call_with_auto_refresh(url, payload=None, headers=None, method="GET"):
 
 def show():
     st.header("Login & Session Key")
+    st.markdown(
+        "This page is for debugging session key generation.<br>"
+        "If you see errors, please check your endpoint and credentials.", unsafe_allow_html=True
+    )
     if st.button("Generate Session Key / Login"):
         key = generate_session_key()
         if key:
             st.success("Session Key generated successfully!")
             st.code(key)
         else:
-            st.error("Session key could not be generated. Check credentials.")
+            st.error("Session key could not be generated. Check credentials and API endpoint.")
     if "session_key" in st.session_state:
         st.info(f"Current session key: {st.session_state['session_key'][:8]}... (hidden for security)")
         gen_time = st.session_state.get("session_key_time", 0)
