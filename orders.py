@@ -17,22 +17,22 @@ def show():
     st.markdown("""
     <style>
     .stApp {
-        max-width: 520px;
+        max-width: 950px;
         margin: auto;
     }
     .order-box {
         background: #f8fafd;
         border-radius: 10px;
         box-shadow: 0 2px 6px #e0e8f0;
-        padding: 18px 10px 8px 10px;
-        margin: 0 0 12px 0;
+        padding: 22px 28px 10px 28px;
+        margin: 0 0 16px 0;
     }
     .order-summary {
         background: #e6f3ff;
         border-radius: 7px;
-        padding: 10px 10px;
-        font-size: 0.94rem;
-        margin-bottom: 8px;
+        padding: 12px 16px;
+        font-size: 1.01rem;
+        margin-bottom: 12px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -40,7 +40,7 @@ def show():
     st.markdown('<div class="order-box">', unsafe_allow_html=True)
     st.header("Order Place", divider="rainbow")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns([2,2,2,2], gap="large")
 
     with col1:
         tradingsymbol = st.text_input("Symbol", key="ts", placeholder="RELIANCE", label_visibility="visible")
@@ -67,7 +67,7 @@ def show():
         else:
             st.caption("LTP fetch failed, enter qty manually.")
 
-    colQ, colT, colD, colA = st.columns(4)
+    colQ, colT, colD, colA = st.columns([2,2,2,2], gap="large")
     with colQ:
         qty = st.number_input("Qty", min_value=1, value=qty_auto, step=1, key="qty")
     with colT:
