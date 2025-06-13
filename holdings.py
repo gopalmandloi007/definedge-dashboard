@@ -63,15 +63,13 @@ def highlight_pnl(val):
         pass
     return 'color: black'
 
-def main():
+def show():
     st.set_page_config(layout="wide")
     st.header("=========== Holdings Dashboard Pro ===========")
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
     auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
-    if auto_refresh:
-        st.experimental_rerun()
-        st_autorefresh = st.experimental_rerun
+    # Note: For actual auto-refresh, you can use st.experimental_rerun() in combination with a timer
 
     try:
         data = integrate_get("/holdings")
@@ -202,5 +200,6 @@ def main():
     except Exception as e:
         st.error(f"Error loading holdings: {e}")
 
+# For Streamlit compatibility
 if __name__ == "__main__":
-    main()
+    show()
