@@ -16,7 +16,7 @@ PAGES = {
     "GTT": "gtt",
     "GTT/OCO Manage": "gtt_oco_manage",
     "Square Off": "squareoff",  # <-- Yeh line add karein
-    "Login": "session_utilis",
+    "Login": "session_utils",
     "Websocket Help": "websocket_help",
 }
 
