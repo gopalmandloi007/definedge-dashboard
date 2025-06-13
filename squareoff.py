@@ -5,7 +5,6 @@ def squareoff_form(item, qty, ts_info, is_position=False):
     label = "Position" if is_position else "Holding"
     unique_id = f"{label}_{ts_info['tradingsymbol']}"
 
-    # Store qty_option in session_state for immediate UI update
     qty_option = st.radio(
         f"Quantity to Square Off for {ts_info['tradingsymbol']}",
         ["Full", "Partial"],
@@ -77,6 +76,8 @@ def squareoff_form(item, qty, ts_info, is_position=False):
                 st.error(f"Order Failed: {resp.get('message','Error')}")
             else:
                 st.success(f"Order Response: {status}")
+            st.session_state["sq_id"] = None  # Only reset after submit
+            st.rerun()
 
 def show():
     st.title("⚡ Definedge Integrate Dashboard")
@@ -86,7 +87,6 @@ def show():
     st.header("📦 Holdings")
     data = integrate_get("/holdings")
     holdings = data.get("data", [])
-    # Table columns
     hold_cols = ["tradingsymbol", "exchange", "isin", "dp_qty", "t1_qty", "avg_buy_price", "haircut"]
     col_labels = ["Symbol", "Exch", "ISIN", "DP Qty", "T1 Qty", "Avg Price", "Haircut"]
     st.markdown("#### Holdings List")
@@ -114,17 +114,14 @@ def show():
             if columns[-1].button("Square Off", key=f"squareoff_btn_{ts_info['tradingsymbol']}"):
                 st.session_state["sq_id"] = f"HOLD_{idx}"
                 st.rerun()
-            # Show form below table if this row is selected
             if sq_id == f"HOLD_{idx}":
                 squareoff_form(holding, qty, ts_info, is_position=False)
-                st.session_state["sq_id"] = None
+                # ❌ DO NOT reset st.session_state["sq_id"] here!
 
     # --- Positions Table ---
     st.header("📝 Positions")
     pdata = integrate_get("/positions")
     positions = pdata.get("data", [])
-
-    # Table columns
     pos_cols = ["tradingsymbol", "exchange", "product_type", "quantity", "buy_avg_price", "sell_avg_price", "net_qty", "pnl"]
     pos_labels = ["Symbol", "Exch", "Product", "Qty", "Buy Avg", "Sell Avg", "Net Qty", "PnL"]
     st.markdown("#### Positions List")
@@ -135,7 +132,6 @@ def show():
 
     user_positions = []
     for p in positions:
-        # Accept both positive and negative qty for open positions
         qty = int(float(p.get("net_qty", p.get("quantity", 0))))
         if qty != 0:
             user_positions.append(p)
@@ -150,9 +146,7 @@ def show():
             if columns[-1].button("Square Off", key=f"squareoff_btn_pos_{pos['tradingsymbol']}_{idx}"):
                 st.session_state["sqp_id"] = f"POS_{idx}"
                 st.rerun()
-            # Show form below table if this row is selected
             if sqp_id == f"POS_{idx}":
-                # Fake ts_info for positions (for UI consistency)
                 ts_info = {
                     "tradingsymbol": pos.get("tradingsymbol"),
                     "exchange": pos.get("exchange"),
@@ -160,8 +154,7 @@ def show():
                 }
                 qty = abs(int(float(pos.get("net_qty", pos.get("quantity", 0)))))
                 squareoff_form(pos, qty, ts_info, is_position=True)
-                st.session_state["sqp_id"] = None
+                # ❌ DO NOT reset st.session_state["sqp_id"] here!
 
-# ---- To run this page ----
 if __name__ == "__main__":
     show()
