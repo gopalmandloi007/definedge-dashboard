@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import requests
 import io
 from datetime import datetime, timedelta
@@ -49,7 +48,7 @@ def get_time_range(days, endtime="1530"):
     return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
 
 def show():
-    st.header("Simple Candlestick Demo (Definedge API)")
+    st.header("Definedge Simple Candlestick Chart Demo")
 
     api_key = st.secrets.get("integrate_api_session_key", "")
     master_df = load_master()
@@ -58,7 +57,6 @@ def show():
     with col1:
         segment = st.selectbox("Segment", sorted(master_df["segment"].str.upper().unique()), index=0)
     with col2:
-        # Symbol dropdown for selected segment
         symbol_list = master_df[master_df["segment"] == segment]["symbol"].unique()
         symbol = st.selectbox("Symbol", sorted(symbol_list), index=0)
 
