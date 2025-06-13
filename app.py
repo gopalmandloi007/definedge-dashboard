@@ -13,6 +13,12 @@ st.write("Python sys.path:", sys.path)
 # Debug: print files in repo root
 st.write("Files in repo root:", os.listdir("."))
 
+try:
+    import simple_chart_demo
+    st.write("Direct import of simple_chart_demo: SUCCESS")
+except Exception as e:
+    st.write(f"Direct import of simple_chart_demo failed: {e}")
+
 st.title("Definedge Integrate Dashboard")
 
 PAGES = {
