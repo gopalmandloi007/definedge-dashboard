@@ -1,5 +1,5 @@
-import requests
 import streamlit as st
+import requests
 import time
 
 SESSION_KEY_VALIDITY_SECONDS = 3000  # 50 minutes
@@ -7,7 +7,7 @@ SESSION_KEY_VALIDITY_SECONDS = 3000  # 50 minutes
 def generate_session_key():
     client_code = st.secrets["CLIENT_CODE"]
     password = st.secrets["PASSWORD"]
-    api_url = "https://api.definedge.com/session"  # Update if different
+    api_url = "https://api.definedge.com/session"  # Change if your endpoint differs
 
     payload = {
         "clientcode": client_code,
@@ -67,3 +67,19 @@ def api_call_with_auto_refresh(url, payload=None, headers=None, method="GET"):
             st.error("Invalid response from API after re-login.")
             return None
     return data
+
+# --- Add this show() function below for Streamlit menu integration ---
+def show():
+    st.header("Login & Session Key")
+    if st.button("Generate Session Key / Login"):
+        key = generate_session_key()
+        if key:
+            st.success("Session Key generated successfully!")
+            st.code(key)
+        else:
+            st.error("Session key could not be generated. Check credentials.")
+    if "session_key" in st.session_state:
+        st.info(f"Current session key: {st.session_state['session_key'][:8]}... (hidden for security)")
+        gen_time = st.session_state.get("session_key_time", 0)
+        if gen_time:
+            st.caption(f"Generated at: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(gen_time))}")
