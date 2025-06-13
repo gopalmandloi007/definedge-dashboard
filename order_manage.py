@@ -5,14 +5,17 @@ import requests
 def show():
     st.header("Orders Book & Manage")
 
-    # --- Orders Book Section ---
-    st.subheader("Order Book (Open/Partially Filled)")
-    data = integrate_get("/orderbook")
-    orderlist = data.get("orderBookDetail", [])
-    refreshed = st.button("🔄 Refresh Orders", use_container_width=True)
+    # Use the correct endpoint (try '/orders' if '/orderbook' gives 404)
+    try:
+        data = integrate_get("/orders")  # <-- Change here!
+    except Exception as e:
+        st.error(f"Failed to fetch order book: {e}")
+        return
 
+    orderlist = data.get("orderBookDetail", []) or data.get("orders", []) or data.get("data", []) or []
+    refreshed = st.button("🔄 Refresh Orders", use_container_width=True)
     if refreshed:
-        st.experimental_rerun()
+        st.rerun()  # <-- Change here!
 
     if orderlist:
         open_orders = [
@@ -35,9 +38,7 @@ def show():
                 f"{symbol} ({order_id}) | {order_type} @ {price} | Qty: {qty} | Status: {status}"
             ):
                 st.json(order)
-
                 col1, col2 = st.columns(2)
-                # --- MODIFY SECTION ---
                 with col1:
                     st.markdown("#### Modify Order")
                     with st.form(f"ord_mod_form_{order_id}", clear_on_submit=True):
@@ -78,7 +79,6 @@ def show():
                                 "order_type": order_type,
                                 "price_type": price_type,
                             }
-                            # Optional fields
                             if disclosed_quantity:
                                 payload["disclosed_quantity"] = str(disclosed_quantity)
                             if trigger_price:
@@ -95,8 +95,7 @@ def show():
                             else:
                                 st.success("Order modification submitted!")
                                 st.json(resp)
-                            st.experimental_rerun()
-                # --- CANCEL SECTION ---
+                            st.rerun()
                 with col2:
                     st.markdown("#### Cancel Order")
                     if st.button("Cancel", key=f"ord_cancel_{order_id}"):
@@ -113,6 +112,6 @@ def show():
                         else:
                             st.success("Order cancelled!")
                             st.json(result)
-                        st.experimental_rerun()
+                        st.rerun()
     else:
         st.info("No open/partial orders found.")
