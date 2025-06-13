@@ -1,7 +1,12 @@
 import streamlit as st
 import importlib
 import os
+import sys
+import os
 
+# Fix sys.path if first entry is 'app.py', replace with current directory
+if sys.path[0].endswith("app.py"):
+    sys.path[0] = os.path.dirname(os.path.abspath(__file__))
 st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")  # <-- MUST be first
 import sys
 st.write("Python sys.path:", sys.path)
