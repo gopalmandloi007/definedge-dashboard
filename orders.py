@@ -24,66 +24,59 @@ def show():
         background: #f8fafd;
         border-radius: 10px;
         box-shadow: 0 2px 6px #e0e8f0;
-        padding: 22px 18px 8px 18px;
-        margin: 0 0 16px 0;
+        padding: 18px 10px 8px 10px;
+        margin: 0 0 12px 0;
     }
     .order-summary {
         background: #e6f3ff;
         border-radius: 7px;
-        padding: 12px 16px;
-        font-size: 0.99rem;
-        margin-bottom: 12px;
-    }
-    .order-btn {
-        width: 48%;
-        margin: 0 1%;
-        font-size: 1.02rem;
+        padding: 10px 10px;
+        font-size: 0.94rem;
+        margin-bottom: 8px;
     }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="order-box">', unsafe_allow_html=True)
-    st.header("Quick Order Placement", divider="rainbow")
+    st.header("Order Place", divider="rainbow")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
+
     with col1:
-        tradingsymbol = st.text_input("Symbol", key="ts", placeholder="e.g. RELIANCE")
+        tradingsymbol = st.text_input("Symbol", key="ts", placeholder="RELIANCE", label_visibility="visible")
+        price_type = st.selectbox("Type", ["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"], key="pt")
     with col2:
         exchange = st.selectbox("Exch", ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"], key="exch")
-
-    col3, col4 = st.columns(2)
+        validity = st.selectbox("Validity", ["DAY", "IOC", "EOS"], key="val")
     with col3:
         order_type = st.selectbox("Side", ["BUY", "SELL"], key="ot")
-    with col4:
         product_type = st.selectbox("Product", ["CNC", "INTRADAY", "NORMAL"], key="prod")
-
-    col5, col6 = st.columns(2)
-    with col5:
-        price_type = st.selectbox("Type", ["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"], key="pt")
-    with col6:
-        validity = st.selectbox("Validity", ["DAY", "IOC", "EOS"], key="val")
-
-    amount = st.number_input("₹ Amount", min_value=0.0, value=0.0, step=100.0, key="amt", format="%.2f")
+    with col4:
+        amount = st.number_input("₹ Amt", min_value=0.0, value=0.0, step=100.0, key="amt", format="%.2f")
+        price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
 
     ltp = 0.0
-    price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
+    qty_auto = 1
     if amount > 0 and tradingsymbol and exchange:
         ltp = get_ltp(tradingsymbol, exchange, api_session_key)
         if ltp > 0:
             qty_auto = int(amount // ltp)
             st.caption(f"Auto-Qty at LTP ₹{ltp:.2f}: {qty_auto}")
         else:
-            st.warning("Could not fetch LTP. Enter qty manually.")
-            qty_auto = 1
-    else:
-        qty_auto = 1
+            st.caption("LTP fetch failed, enter qty manually.")
 
-    qty = st.number_input("Quantity", min_value=1, value=qty_auto, step=1, key="qty")
-    trigger_price = st.number_input("Trigger Price", min_value=0.0, value=0.0, step=0.05, key="tr_pr", format="%.2f")
-    disclosed_quantity = st.number_input("Disclosed Qty", min_value=0, value=0, step=1, key="dis_qty")
-    amo = st.checkbox("After Market Order (AMO)?", key="amo")
+    colQ, colT, colD, colA = st.columns(4)
+    with colQ:
+        qty = st.number_input("Qty", min_value=1, value=qty_auto, step=1, key="qty")
+    with colT:
+        trigger_price = st.number_input("Trig Price", min_value=0.0, value=0.0, step=0.05, key="tr_pr", format="%.2f")
+    with colD:
+        disclosed_quantity = st.number_input("Disc Qty", min_value=0, value=0, step=1, key="dis_qty")
+    with colA:
+        amo = st.checkbox("AMO?", key="amo")
+    
     remarks = st.text_input("Remarks (optional)", key="rem")
 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -91,20 +84,19 @@ def show():
     # Preview summary
     if tradingsymbol and qty and order_type and price_type:
         st.markdown('<div class="order-summary">', unsafe_allow_html=True)
-        st.markdown(f"""
-        <b>Preview:</b> {order_type} {qty} x <b>{tradingsymbol}</b> @ ₹{price} ({price_type}, {product_type})<br>
-        Exch: {exchange} | Validity: {validity} | AMO: {"Yes" if amo else "No"}
-        """, unsafe_allow_html=True)
+        st.markdown(
+            f"<b>Preview:</b> {order_type} {qty} x <b>{tradingsymbol}</b> @ ₹{price} ({price_type}, {product_type})<br>"
+            f"Exch: {exchange} | Validity: {validity} | AMO: {'Yes' if amo else 'No'}",
+            unsafe_allow_html=True
+        )
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Confirm popup logic
     if "order_confirm_popup" not in st.session_state:
         st.session_state.order_confirm_popup = False
     if "pending_order_data" not in st.session_state:
         st.session_state.pending_order_data = None
 
     if st.button("Review & Place Order", use_container_width=True, type="primary"):
-        # Gather order data
         data = {
             "tradingsymbol": tradingsymbol,
             "exchange": exchange,
@@ -127,7 +119,6 @@ def show():
         st.session_state.order_confirm_popup = True
         st.experimental_rerun()
 
-    # Popup confirmation
     if st.session_state.get("order_confirm_popup", False):
         st.markdown("""
         <style>
@@ -141,29 +132,23 @@ def show():
         .popup-content {
             background: #fff;
             border-radius: 12px;
-            padding: 32px 24px 16px 24px;
+            padding: 26px 16px 16px 16px;
             box-shadow: 0 2px 20px #888;
-            max-width: 340px;
-            width: 92%;
+            max-width: 310px;
+            width: 96%;
             text-align: center;
         }
         .popup-btn {
-            margin: 18px 12px 0 12px;
-            min-width: 90px;
+            margin: 12px 10px 0 10px;
+            min-width: 80px;
         }
         </style>
         """, unsafe_allow_html=True)
         st.markdown("""
         <div class="popup-bg">
             <div class="popup-content">
-                <h4>Confirm Order Placement</h4>
+                <h5>Confirm Order</h5>
                 <p>Place <b>{side}</b> {qty} x <b>{symb}</b> @ ₹{price}?</p>
-                <div style="margin-top:22px;">
-                    <form method="post">
-                        <button class="popup-btn" name="yes" type="submit" style="background:#2e8c2e;color:#fff;border:none;padding:7px 18px;border-radius:6px;">Yes</button>
-                        <button class="popup-btn" name="no" type="submit" style="background:#c22b2b;color:#fff;border:none;padding:7px 18px;border-radius:6px;">No</button>
-                    </form>
-                </div>
             </div>
         </div>
         """.format(
@@ -173,7 +158,6 @@ def show():
             price=st.session_state.pending_order_data["price"]
         ), unsafe_allow_html=True)
 
-        # Real buttons
         colc1, colc2 = st.columns(2)
         with colc1:
             if st.button("Yes, Place", key="yes_place"):
