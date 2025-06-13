@@ -7,35 +7,19 @@ from datetime import datetime, timedelta
 
 @st.cache_data
 def load_master():
-    # Your master file is tab-separated with no header
     df = pd.read_csv("master.csv", sep="\t", header=None)
     df.columns = [
-        "segment",      # 0
-        "token",        # 1
-        "symbol",       # 2
-        "instrument",   # 3
-        "series",       # 4
-        "isin1",        # 5
-        "facevalue",    # 6
-        "lot",          # 7
-        "something",    # 8
-        "zero1",        # 9
-        "two1",         #10
-        "one1",         #11
-        "isin",         #12
-        "one2"          #13
+        "segment", "token", "symbol", "instrument", "series", "isin1",
+        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
     ]
-    # Return only relevant columns for lookup
     return df[["segment", "token", "symbol", "instrument"]]
 
 def get_token(symbol, segment, master_df):
     symbol = symbol.strip().upper()
     segment = segment.strip().upper()
-    # Try match on 'symbol'
     row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
     if not row.empty:
         return row.iloc[0]['token']
-    # Else, try match on 'instrument' for cases like RELIANCE-EQ
     row2 = master_df[(master_df['instrument'] == symbol) & (master_df['segment'] == segment)]
     if not row2.empty:
         return row2.iloc[0]['token']
@@ -99,6 +83,9 @@ def get_time_range(days, endtime="1530"):
     frm = to - timedelta(days=days)
     return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
 
+def display_metric(label, value):
+    st.metric(label, "N/A" if pd.isna(value) else f"{value:.2f}")
+
 def show():
     st.header("Symbol Technical Details (Definedge)")
 
@@ -119,7 +106,7 @@ def show():
         return
 
     try:
-        from_dt, to_dt = get_time_range(220)
+        from_dt, to_dt = get_time_range(420) # ~20 months for monthly RSI
         daily = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
         # Resample for week/month
         week_df = daily.copy().set_index("Date").resample("W").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
@@ -149,17 +136,17 @@ def show():
 
     colm = st.columns(3)
     with colm[0]:
-        st.metric("Monthly RSI", f"{rsi_monthly:.2f}")
+        display_metric("Monthly RSI", rsi_monthly)
         st.metric("LTP", f"{ltp:.2f}")
         st.metric("20 EMA", f"{ema20:.2f}")
         st.metric("Updays (15d)", updays)
     with colm[1]:
-        st.metric("Weekly RSI", f"{rsi_weekly:.2f}")
+        display_metric("Weekly RSI", rsi_weekly)
         st.metric("50 EMA", f"{ema50:.2f}")
         st.metric("50 EMA / 20 EMA", f"{ema50_ema20:.4f}")
         st.metric("Downdays (15d)", downdays)
     with colm[2]:
-        st.metric("Daily RSI", f"{rsi_daily:.2f}")
+        display_metric("Daily RSI", rsi_daily)
         st.metric("200 EMA", f"{ema200:.2f}")
         st.metric("20 EMA / LTP", f"{ema20_ltp:.4f}")
 
