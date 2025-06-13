@@ -6,8 +6,7 @@ import io
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
 
-# ---- Yahan apne helper functions paste karein (load_master, fetch_candles_definedge, etc) ----
-# ... aapke pehle ke code ki tarah
+# --- Paste your helper functions from your existing code here: load_master, fetch_candles_definedge, compute_ema, count_updays, count_downdays, get_time_range ---
 
 def scan_symbols(master_df, api_key, updown_window=15, days=120, ema_ltp_thr=0.95, ema_ratio_thr=0.95):
     result = []
