@@ -2,51 +2,63 @@ import streamlit as st
 from utils import integrate_get, integrate_post
 
 def squareoff_form(item, qty, ts_info, is_position=False):
-    st.markdown("---")
     label = "Position" if is_position else "Holding"
-    st.subheader(f"Square Off {label}: {ts_info['tradingsymbol']} ({qty} Qty)")
+    unique_id = f"{label}_{ts_info['tradingsymbol']}"
 
-    with st.form(f"squareoff_form_{label}_{ts_info['tradingsymbol']}"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            exch = st.selectbox("Exchange", [ts_info['exchange']], disabled=True)
-            tradingsymbol = ts_info["tradingsymbol"]
-            st.write(f"**ISIN:** {ts_info.get('isin', '')}")
-        with col2:
-            qty_option = st.radio("Quantity to Square Off", ["Full", "Partial"], horizontal=True, key=f"qtyopt_{tradingsymbol}")
-            if qty_option == "Partial":
-                squareoff_qty = st.number_input(
-                    "Enter quantity", min_value=1, max_value=int(qty), value=1, key=f"squareoffqty_{tradingsymbol}")
-            else:
-                squareoff_qty = int(qty)
-        with col3:
-            price_option = st.radio("Order Type", ["Market Order", "Limit Order"], horizontal=True, key=f"pricetype_{tradingsymbol}")
-            if price_option == "Limit Order":
-                # Try both avg_buy_price and average_price for holdings/positions
-                default_price = float(item.get("avg_buy_price") or item.get("average_price") or 0)
-                squareoff_price = st.number_input(
-                    "Limit Price (₹)", min_value=0.01, value=round(default_price,2), key=f"price_{tradingsymbol}")
-                price_type = "LIMIT"
-            else:
-                squareoff_price = 0.0
-                price_type = "MARKET"
+    # Store qty_option in session_state for immediate UI update
+    qty_option = st.radio(
+        f"Quantity to Square Off for {ts_info['tradingsymbol']}",
+        ["Full", "Partial"],
+        horizontal=True,
+        key=f"qtyopt_{unique_id}"
+    )
 
-        validity = st.selectbox("Order Validity", ["DAY", "IOC", "EOS"], index=0, key=f"validity_{tradingsymbol}")
-        remarks = st.text_input("Remarks (optional)", key=f"remarks_{tradingsymbol}")
+    if qty_option == "Partial":
+        squareoff_qty = st.number_input(
+            "Enter quantity to square off",
+            min_value=1,
+            max_value=int(qty),
+            value=1,
+            key=f"squareoffqty_{unique_id}"
+        )
+    else:
+        squareoff_qty = int(qty)
 
-        disclose = st.checkbox("Disclose Partial Quantity?", key=f"disclose_{tradingsymbol}")
-        if disclose:
-            disclosed_quantity = st.number_input(
-                "Disclosed Quantity (optional)", min_value=1, max_value=int(squareoff_qty), value=1, key=f"discloseqty_{tradingsymbol}")
-        else:
-            disclosed_quantity = None
+    price_option = st.radio(
+        "Order Type",
+        ["Market Order", "Limit Order"],
+        horizontal=True,
+        key=f"pricetype_{unique_id}"
+    )
 
-        st.markdown("---")
+    if price_option == "Limit Order":
+        default_price = float(item.get("avg_buy_price") or item.get("average_price") or item.get("buy_avg_price") or 0)
+        squareoff_price = st.number_input(
+            "Limit Price (₹)", min_value=0.01, value=round(default_price, 2), key=f"price_{unique_id}"
+        )
+        price_type = "LIMIT"
+    else:
+        squareoff_price = 0.0
+        price_type = "MARKET"
+
+    validity = st.selectbox("Order Validity", ["DAY", "IOC", "EOS"], index=0, key=f"validity_{unique_id}")
+    remarks = st.text_input("Remarks (optional)", key=f"remarks_{unique_id}")
+
+    disclose = st.checkbox("Disclose Partial Quantity?", key=f"disclose_{unique_id}")
+    if disclose:
+        disclosed_quantity = st.number_input(
+            "Disclosed Quantity (optional)", min_value=1, max_value=int(squareoff_qty), value=1, key=f"discloseqty_{unique_id}"
+        )
+    else:
+        disclosed_quantity = None
+
+    st.markdown("---")
+    with st.form(f"squareoff_form_{unique_id}"):
         submitted = st.form_submit_button("🟢 Place Square Off Order")
         if submitted:
             payload = {
-                "exchange": exch,
-                "tradingsymbol": tradingsymbol,
+                "exchange": ts_info['exchange'],
+                "tradingsymbol": ts_info["tradingsymbol"],
                 "order_type": "SELL",
                 "quantity": str(squareoff_qty),
                 "price": str(squareoff_price),
@@ -112,9 +124,6 @@ def show():
     pdata = integrate_get("/positions")
     positions = pdata.get("data", [])
 
-    # --- DEBUG: Show raw data for troubleshooting if needed
-    # st.write("Raw positions data:", positions)
-
     # Table columns
     pos_cols = ["tradingsymbol", "exchange", "product_type", "quantity", "buy_avg_price", "sell_avg_price", "net_qty", "pnl"]
     pos_labels = ["Symbol", "Exch", "Product", "Qty", "Buy Avg", "Sell Avg", "Net Qty", "PnL"]
@@ -126,9 +135,9 @@ def show():
 
     user_positions = []
     for p in positions:
-        # Try both "quantity" and "net_qty" (adapt if your API uses different field)
+        # Accept both positive and negative qty for open positions
         qty = int(float(p.get("net_qty", p.get("quantity", 0))))
-        if abs(qty) > 0:
+        if qty != 0:
             user_positions.append(p)
     if not user_positions:
         st.info("No open positions to square off.")
