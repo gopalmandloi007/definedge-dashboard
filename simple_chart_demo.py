@@ -25,8 +25,8 @@ def get_token(symbol, segment, master_df):
         return row2.iloc[0]['token']
     return None
 
-def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
-    url = f"https://data.definedgesecurities.com/sds/history/{segment}/{token}/{timeframe}/{from_dt}/{to_dt}"
+def fetch_candles_definedge(segment, token, from_dt, to_dt, api_key):
+    url = f"https://data.definedgesecurities.com/sds/history/{segment}/{token}/day/{from_dt}/{to_dt}"
     headers = {"Authorization": api_key}
     resp = requests.get(url, headers=headers)
     if resp.status_code != 200:
@@ -35,25 +35,26 @@ def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
     df = pd.read_csv(io.StringIO(resp.text), header=None, names=cols)
     df = df[df["Dateandtime"].notnull()]
     df = df[df["Dateandtime"].astype(str).str.strip() != ""]
+    # Parse date, only keep rows with valid dates
     df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d%m%Y%H%M", errors="coerce")
     df = df.dropna(subset=["Date"])
+    # Only keep dates up to today (no future dates!)
+    df = df[df["Date"] <= pd.Timestamp.now()]
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    # Debug info:
-    debug_info = {
-        "api_response_lines": resp.text.split('\n')[:5],
-        "date_parsed": df[["Dateandtime", "Date"]].head(15),
-    }
-    return df, debug_info
+    return df
 
 def get_time_range(days, endtime="1530"):
-    to = datetime.now()
-    to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
+    # Always end at today (Indian market close time)
+    now = datetime.now()
+    to = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    if to > now:
+        to = now  # In case running before market close
     frm = to - timedelta(days=days)
     return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
 
 def show():
-    st.header("Definedge Simple Candlestick Chart Demo")
+    st.header("Definedge Simple Candlestick Chart Demo (Daily, Live)")
 
     api_key = st.secrets.get("integrate_api_session_key", "")
     master_df = load_master()
@@ -72,9 +73,8 @@ def show():
         return
 
     from_dt, to_dt = get_time_range(120)
-    st.write("From:", from_dt, "To:", to_dt)
     try:
-        df, debug_info = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
+        df = fetch_candles_definedge(segment, token, from_dt, to_dt, api_key)
     except Exception as e:
         st.error(f"Error fetching candles: {e}")
         return
@@ -82,10 +82,6 @@ def show():
     if df.empty:
         st.warning("No data fetched for this symbol.")
         return
-
-    # Debug info:
-    st.write("API Response first 5 lines:", debug_info["api_response_lines"])
-    st.write(debug_info["date_parsed"])
 
     df = df.sort_values("Date")
     chart_df = df.tail(60)
@@ -101,12 +97,12 @@ def show():
         height=400,
         margin=dict(l=10, r=10, t=30, b=10),
         xaxis_rangeslider_visible=False,
-        title=f"{symbol} Candlestick Chart"
+        title=f"{symbol} Daily Candlestick Chart"
     )
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
 
-    st.info("Candlestick chart is live from Definedge API and master file.")
+    st.info("This chart shows daily candles including the latest available data from Definedge API.")
 
 if __name__ == "__main__":
     show()
