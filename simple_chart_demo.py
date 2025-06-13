@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objs as go
+import os
 
 def plot_candlestick(df, title="Candlestick Chart"):
     fig = go.Figure(data=[go.Candlestick(
