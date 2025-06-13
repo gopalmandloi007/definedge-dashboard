@@ -59,6 +59,7 @@ def show():
     with col2:
         symbol_list = master_df[master_df["segment"] == segment]["symbol"].unique()
         symbol = st.selectbox("Symbol", sorted(symbol_list), index=0)
+    st.write("Selected:", segment, symbol)
 
     token = get_token(symbol, segment, master_df)
     if not token:
@@ -96,3 +97,7 @@ def show():
     st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
 
     st.info("Candlestick chart is live from Definedge API and master file.")
+
+# Run the app (for Streamlit Cloud or local)
+if __name__ == "__main__":
+    show()
