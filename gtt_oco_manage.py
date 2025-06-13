@@ -1,7 +1,7 @@
 import streamlit as st
 from utils import integrate_post
 
-def place_gtt_oco():
+def show():
     st.header("Place GTT / OCO Order")
 
     st.markdown("#### Select Order Type")
@@ -14,7 +14,7 @@ def place_gtt_oco():
             tradingsymbol = st.text_input("Trading Symbol", key="gtt_tradingsymbol")
             exchange = st.selectbox("Exchange", ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"], key="gtt_exchange")
         with col2:
-            gtt_action = st.radio("Action", ["BUY", "SELL"], horizontal=True, key="gtt_action")
+            action = st.radio("Action", ["BUY", "SELL"], horizontal=True, key="gtt_action")
             product_type = st.radio("Product Type", ["CNC", "INTRADAY", "NORMAL"], horizontal=True, key="gtt_product_type")
         with col3:
             condition = st.radio("Condition", ["LTP_ABOVE", "LTP_BELOW"], horizontal=True, key="gtt_condition")
@@ -29,7 +29,7 @@ def place_gtt_oco():
                 "tradingsymbol": tradingsymbol,
                 "condition": condition,
                 "alert_price": str(alert_price),
-                "order_type": gtt_action,
+                "order_type": action,
                 "price": str(order_price),
                 "quantity": str(quantity),
                 "product_type": product_type
@@ -50,7 +50,7 @@ def place_gtt_oco():
             tradingsymbol = st.text_input("Trading Symbol", key="oco_tradingsymbol")
             exchange = st.selectbox("Exchange", ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"], key="oco_exchange")
         with col2:
-            order_action = st.radio("Action", ["BUY", "SELL"], horizontal=True, key="oco_action")
+            action = st.radio("Action", ["BUY", "SELL"], horizontal=True, key="oco_action")
             product_type = st.radio("Product Type", ["CNC", "INTRADAY", "NORMAL"], horizontal=True, key="oco_product_type")
         with col3:
             target_price = st.number_input("Target Price", min_value=0.0, step=0.05, key="oco_target_price")
@@ -63,7 +63,7 @@ def place_gtt_oco():
             payload = {
                 "tradingsymbol": tradingsymbol,
                 "exchange": exchange,
-                "order_type": order_action,
+                "order_type": action,
                 "product_type": product_type,
                 "target_price": str(target_price),
                 "stoploss_price": str(stoploss_price),
@@ -78,6 +78,3 @@ def place_gtt_oco():
             else:
                 st.success("OCO Order (target/stoploss) submitted!")
                 st.json(resp)
-
-def show():
-    place_gtt_oco()
