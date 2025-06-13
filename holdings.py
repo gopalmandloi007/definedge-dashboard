@@ -63,15 +63,23 @@ def highlight_pnl(val):
     return 'color: black'
 
 def get_gtt_stoploss_dict():
-    # Fetch all GTT orders and build a dict: {symbol: stoploss_price}
+    # Fetch all GTT+OCO orders and build a dict: {symbol: stoploss_price}
     data = integrate_get("/gttorders")
     gttlist = data.get("pendingGTTOrderBook", [])
     stoploss_dict = dict()
     for order in gttlist:
+        symbol = order.get('tradingsymbol')
+        # Single-leg GTT stoploss
         if order.get('order_type') == 'SELL' and order.get('condition') == 'LTP_BELOW':
-            symbol = order.get('tradingsymbol')
             price = safe_float(order.get('alert_price'))
-            # If multiple, keep the lowest stoploss
+            # If multiple, keep the lowest stoploss price
+            if symbol in stoploss_dict:
+                stoploss_dict[symbol] = min(stoploss_dict[symbol], price)
+            else:
+                stoploss_dict[symbol] = price
+        # OCO stoploss
+        if 'stoploss_price' in order and safe_float(order.get('stoploss_price')) > 0:
+            price = safe_float(order.get('stoploss_price'))
             if symbol in stoploss_dict:
                 stoploss_dict[symbol] = min(stoploss_dict[symbol], price)
             else:
@@ -79,11 +87,11 @@ def get_gtt_stoploss_dict():
     return stoploss_dict
 
 def show():
-    st.header("=========== Holdings Dashboard with Open Risk ===========")
+    st.header("=========== Holdings Dashboard with Open Risk & Allocation ===========")
     api_session_key = st.secrets.get("integrate_api_session_key", "")
 
     try:
-        # GTT Stoploss data
+        # GTT+OCO Stoploss data
         stoploss_dict = get_gtt_stoploss_dict()
 
         data = integrate_get("/holdings")
@@ -109,8 +117,6 @@ def show():
         total_invested = 0.0
         total_current = 0.0
         total_open_risk = 0.0
-
-        symbols_without_stoploss = []
 
         for h in active_holdings:
             ts = h.get("tradingsymbol")
@@ -147,7 +153,6 @@ def show():
                 open_risk = max(0, (ltp - stoploss_price) * qty)
             else:
                 open_risk = ""
-                symbols_without_stoploss.append(tsym)
 
             total_today_pnl += today_pnl
             total_overall_pnl += overall_pnl
@@ -182,6 +187,11 @@ def show():
         df = pd.DataFrame(rows, columns=headers)
         df = df.sort_values("Invested", ascending=False)
 
+        # Allocation Pie Chart
+        st.subheader("Portfolio Allocation")
+        fig = px.pie(df, names="Symbol", values="Invested", title="Allocation by Invested Amount")
+        st.plotly_chart(fig, use_container_width=True)
+
         st.markdown(f"**Total NSE Holdings: {len(df)}**")
         st.dataframe(
             df.style.applymap(highlight_pnl, subset=["Today P&L", "Overall P&L", "%Chg", "%Chg Avg"]),
@@ -189,12 +199,6 @@ def show():
         )
 
         st.markdown(f"### Total Open Risk: <span style='color:red'>{total_open_risk:,.2f}</span>", unsafe_allow_html=True)
-
-        # Show warning for holdings without stoploss
-        if symbols_without_stoploss:
-            st.warning(
-                f"⚠️ Stoploss (GTT) is NOT set for: **{', '.join(sorted(set(symbols_without_stoploss)))}**. Please place GTT stoploss for these holdings!"
-            )
 
         # Download button
         csv = df.to_csv(index=False).encode('utf-8')
@@ -209,7 +213,7 @@ def show():
         st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     except Exception as e:
-        st.error(f"Error loading holdings or GTT orders: {e}")
+        st.error(f"Error loading holdings or GTT/OCO orders: {e}")
 
 if __name__ == "__main__":
     show()
