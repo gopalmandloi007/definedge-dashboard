@@ -67,6 +67,13 @@ def show():
         symbol = st.selectbox("Symbol", sorted(symbol_list), index=0)
     st.write("Selected:", segment, symbol)
 
+    # EMA checkboxes
+    col3, col4 = st.columns(2)
+    with col3:
+        show_ema20 = st.checkbox("Show 20 EMA", value=True)
+    with col4:
+        show_ema50 = st.checkbox("Show 50 EMA", value=True)
+
     token = get_token(symbol, segment, master_df)
     if not token:
         st.error("Symbol-token mapping not found in master file. Try another symbol.")
@@ -84,15 +91,42 @@ def show():
         return
 
     df = df.sort_values("Date")
-    chart_df = df.tail(60)
-    fig = go.Figure(data=[go.Candlestick(
-        x=chart_df["Date"].dt.strftime("%Y-%m-%d"),   # string dates for category axis
+    chart_df = df.tail(60).copy()
+
+    # Calculate EMAs if needed
+    if show_ema20:
+        chart_df['EMA20'] = chart_df['Close'].ewm(span=20, adjust=False).mean()
+    if show_ema50:
+        chart_df['EMA50'] = chart_df['Close'].ewm(span=50, adjust=False).mean()
+
+    # Make the plot
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
         open=chart_df["Open"],
         high=chart_df["High"],
         low=chart_df["Low"],
         close=chart_df["Close"],
         name="Candles"
-    )])
+    ))
+    # EMA overlays
+    if show_ema20:
+        fig.add_trace(go.Scatter(
+            x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
+            y=chart_df["EMA20"],
+            mode="lines",
+            name="20 EMA",
+            line=dict(color="blue", width=1.5)
+        ))
+    if show_ema50:
+        fig.add_trace(go.Scatter(
+            x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
+            y=chart_df["EMA50"],
+            mode="lines",
+            name="50 EMA",
+            line=dict(color="orange", width=1.5)
+        ))
+
     fig.update_layout(
         height=400,
         margin=dict(l=10, r=10, t=30, b=10),
@@ -103,7 +137,7 @@ def show():
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
 
-    st.info("This chart shows daily candles including the latest available data from Definedge API.")
+    st.info("This chart shows daily candles including the latest available data from Definedge API. Toggle 20/50 EMA above.")
 
 if __name__ == "__main__":
     show()
