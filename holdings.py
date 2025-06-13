@@ -62,18 +62,36 @@ def highlight_pnl(val):
         pass
     return 'color: black'
 
+def get_gtt_stoploss_dict():
+    # Fetch all GTT orders and build a dict: {symbol: stoploss_price}
+    data = integrate_get("/gttorders")
+    gttlist = data.get("pendingGTTOrderBook", [])
+    stoploss_dict = dict()
+    for order in gttlist:
+        if order.get('order_type') == 'SELL' and order.get('condition') == 'LTP_BELOW':
+            symbol = order.get('tradingsymbol')
+            price = safe_float(order.get('alert_price'))
+            # If multiple, keep the lowest stoploss
+            if symbol in stoploss_dict:
+                stoploss_dict[symbol] = min(stoploss_dict[symbol], price)
+            else:
+                stoploss_dict[symbol] = price
+    return stoploss_dict
+
 def show():
-    st.header("=========== Holdings Dashboard (Pro) ===========")
+    st.header("=========== Holdings Dashboard with Open Risk ===========")
     api_session_key = st.secrets.get("integrate_api_session_key", "")
 
     try:
+        # GTT Stoploss data
+        stoploss_dict = get_gtt_stoploss_dict()
+
         data = integrate_get("/holdings")
         holdings = data.get("data", [])
         if not holdings:
             st.info("No holdings found.")
             return
 
-        # Filter only ACTIVE holdings (qty > 0)
         active_holdings = []
         for h in holdings:
             qty = 0.0
@@ -90,6 +108,9 @@ def show():
         total_overall_pnl = 0.0
         total_invested = 0.0
         total_current = 0.0
+        total_open_risk = 0.0
+
+        symbols_without_stoploss = []
 
         for h in active_holdings:
             ts = h.get("tradingsymbol")
@@ -112,12 +133,6 @@ def show():
             ltp = get_ltp(exch, token, api_session_key) if token else 0.0
             prev_close = get_prev_close(exch, token, api_session_key) if token else 0.0
 
-            t1_qty = h.get("t1_qty", 0)
-            haircut = h.get("haircut", 0)
-            collateral_qty = h.get("collateral_qty", 0)
-            sell_amt = safe_float(h.get("sell_amt", 0))
-            trade_qty = safe_float(h.get("trade_qty", 0))
-
             invested = avg_buy * qty
             current = ltp * qty
 
@@ -125,12 +140,21 @@ def show():
             overall_pnl = (ltp - avg_buy) * qty if avg_buy else 0.0
             pct_chg = ((ltp - prev_close) / prev_close * 100) if prev_close else 0.0
             pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if avg_buy else 0.0
-            realized_pnl = 0.0
+
+            # OPEN RISK calculation
+            stoploss_price = stoploss_dict.get(tsym)
+            if stoploss_price is not None and ltp > 0:
+                open_risk = max(0, (ltp - stoploss_price) * qty)
+            else:
+                open_risk = ""
+                symbols_without_stoploss.append(tsym)
 
             total_today_pnl += today_pnl
             total_overall_pnl += overall_pnl
             total_invested += invested
             total_current += current
+            if isinstance(open_risk, (int, float)):
+                total_open_risk += open_risk
 
             rows.append([
                 tsym,
@@ -141,73 +165,51 @@ def show():
                 round(pct_chg, 2),
                 round(today_pnl, 2),
                 round(overall_pnl, 2),
-                round(realized_pnl, 2) if realized_pnl else "",
                 round(pct_chg_avg, 2),
                 round(invested, 2),
                 round(current, 2),
                 exch,
                 isin,
-                t1_qty,
-                haircut,
-                collateral_qty,
-                round(sell_amt, 2),
-                int(trade_qty)
+                round(stoploss_price, 2) if stoploss_price is not None else "",
+                round(open_risk, 2) if isinstance(open_risk, (int, float)) else "",
             ])
 
         headers = [
             "Symbol", "LTP", "Avg Buy", "Qty", "P.Close", "%Chg", "Today P&L", "Overall P&L",
-            "Realized P&L", "%Chg Avg", "Invested", "Current", "Exchange", "ISIN", "T1", "Haircut",
-            "Coll Qty", "Sell Amt", "Trade Qty"
+            "%Chg Avg", "Invested", "Current", "Exchange", "ISIN", "Stoploss", "Open Risk"
         ]
 
         df = pd.DataFrame(rows, columns=headers)
         df = df.sort_values("Invested", ascending=False)
 
-        # --- FILTER ---
-        search = st.text_input("🔍 Search Symbol (filter):")
-        if search.strip():
-            df = df[df['Symbol'].str.contains(search.strip(), case=False, na=False)]
-
-        # Pie Chart
-        st.subheader("Portfolio Allocation")
-        fig = px.pie(df, names="Symbol", values="Invested", title="Allocation by Invested Amount")
-        st.plotly_chart(fig, use_container_width=True)
-
-        # P&L Summary
-        st.markdown("""
-| Summary         | Amount        | Total Invested value | Total current value |
-|-----------------|--------------|----------------------|---------------------|
-| Today P&L       | {:.2f}        | {:.2f}               | {:.2f}              |
-| Overall P&L     | {:.2f}        |                      |                     |
-        """.format(total_today_pnl, total_invested, total_current, total_overall_pnl)
-        )
-
-        # Portfolio Return %
-        if total_invested > 0:
-            total_return = (total_current / total_invested - 1) * 100
-            st.markdown(f"**Overall Portfolio Return: {total_return:.2f}%**")
-
-        # Timestamp
-        st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-        # Show table with color styling
         st.markdown(f"**Total NSE Holdings: {len(df)}**")
         st.dataframe(
             df.style.applymap(highlight_pnl, subset=["Today P&L", "Overall P&L", "%Chg", "%Chg Avg"]),
             use_container_width=True
         )
 
+        st.markdown(f"### Total Open Risk: <span style='color:red'>{total_open_risk:,.2f}</span>", unsafe_allow_html=True)
+
+        # Show warning for holdings without stoploss
+        if symbols_without_stoploss:
+            st.warning(
+                f"⚠️ Stoploss (GTT) is NOT set for: **{', '.join(sorted(set(symbols_without_stoploss)))}**. Please place GTT stoploss for these holdings!"
+            )
+
         # Download button
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="⬇️ Download Holdings as CSV",
             data=csv,
-            file_name='holdings.csv',
+            file_name='holdings_with_open_risk.csv',
             mime='text/csv',
         )
 
+        # Timestamp
+        st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
     except Exception as e:
-        st.error(f"Error loading holdings: {e}")
+        st.error(f"Error loading holdings or GTT orders: {e}")
 
 if __name__ == "__main__":
     show()
