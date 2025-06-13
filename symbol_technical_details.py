@@ -4,6 +4,23 @@ import numpy as np
 import requests
 import io
 from datetime import datetime, timedelta
+import plotly.graph_objs as go
+def plot_candlestick(df, title="Candlestick"):
+    fig = go.Figure(data=[go.Candlestick(
+        x=df['Date'],
+        open=df['Open'],
+        high=df['High'],
+        low=df['Low'],
+        close=df['Close'],
+        name=title
+    )])
+    fig.update_layout(xaxis_rangeslider_visible=False)
+    return fig
+
+def show():
+    # ...baaki code...
+    st.markdown("#### Daily Candlestick Chart")
+    st.plotly_chart(plot_candlestick(daily.tail(60)), use_container_width=True)
 
 @st.cache_data
 def load_master():
