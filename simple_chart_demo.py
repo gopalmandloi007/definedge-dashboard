@@ -33,3 +33,5 @@ def show():
 
     st.dataframe(df.tail(10))
     st.plotly_chart(plot_candlestick(df), use_container_width=True)
+    import os
+st.write("Files in root:", os.listdir("."))
