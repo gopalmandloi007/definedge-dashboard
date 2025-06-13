@@ -33,10 +33,8 @@ def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
         raise Exception(f"API error: {resp.status_code} {resp.text}")
     cols = ["Dateandtime", "Open", "High", "Low", "Close", "Volume", "OI"]
     df = pd.read_csv(io.StringIO(resp.text), header=None, names=cols)
-    # Remove blank or null lines
     df = df[df["Dateandtime"].notnull()]
     df = df[df["Dateandtime"].astype(str).str.strip() != ""]
-    # Parse datetime, coerce errors to NaT, then drop
     df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d%m%Y%H%M", errors="coerce")
     df = df.dropna(subset=["Date"])
     for col in ["Open", "High", "Low", "Close", "Volume"]:
@@ -77,7 +75,6 @@ def count_downdays(df, window=15):
     return count
 
 def get_time_range(days, endtime="1530"):
-    # Returns (from_dt, to_dt) in ddMMyyyyHHmm
     to = datetime.now()
     to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
     frm = to - timedelta(days=days)
@@ -106,9 +103,8 @@ def show():
         return
 
     try:
-        from_dt, to_dt = get_time_range(420) # ~20 months for monthly RSI
+        from_dt, to_dt = get_time_range(420)
         daily = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
-        # Resample for week/month
         week_df = daily.copy().set_index("Date").resample("W").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
         month_df = daily.copy().set_index("Date").resample("M").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna().reset_index()
     except Exception as e:
@@ -126,9 +122,21 @@ def show():
     ema20 = daily["EMA20"].iloc[-1]
     ema50 = daily["EMA50"].iloc[-1]
     ema200 = daily["EMA200"].iloc[-1]
-    rsi_daily = daily["RSI"].iloc[-1]
-    rsi_weekly = week_df["RSI"].iloc[-1]
-    rsi_monthly = month_df["RSI"].iloc[-1]
+
+    # Show most recent valid RSI for each timeframe, or N/A
+    if daily["RSI"].notna().any():
+        rsi_daily = daily["RSI"].dropna().iloc[-1]
+    else:
+        rsi_daily = np.nan
+    if week_df["RSI"].notna().any():
+        rsi_weekly = week_df["RSI"].dropna().iloc[-1]
+    else:
+        rsi_weekly = np.nan
+    if month_df["RSI"].notna().any():
+        rsi_monthly = month_df["RSI"].dropna().iloc[-1]
+    else:
+        rsi_monthly = np.nan
+
     ema20_ltp = ema20 / ltp if ltp else np.nan
     ema50_ema20 = ema50 / ema20 if ema20 else np.nan
     updays = count_updays(daily, 15)
