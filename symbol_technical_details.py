@@ -49,8 +49,8 @@ def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
         raise Exception(f"API error: {resp.status_code} {resp.text}")
     cols = ["Dateandtime", "Open", "High", "Low", "Close", "Volume", "OI"]
     df = pd.read_csv(io.StringIO(resp.text), header=None, names=cols)
-    # Parse datetime
-    df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d-%m-%Y %H:%M")
+    # Correct datetime parsing here:
+    df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d%m%Y%H%M")
     # Convert to float (in case API returns as string)
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
