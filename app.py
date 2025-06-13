@@ -17,6 +17,7 @@ PAGES = {
     "GTT Order Place": "gtt_oco_manage", # Was "GTT/OCO Manage"
     "Square Off": "squareoff",
     "Symbol Technical Details": "symbol_technical_details",
+    "Definedge Batch Symbol Scanner": "definedge_batch_scan",
     "Websocket Help": "websocket_help",
 }
 
