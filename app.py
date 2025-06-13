@@ -3,7 +3,8 @@ import importlib
 import os
 
 st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")  # <-- MUST be first
-
+import sys
+st.write("Python sys.path:", sys.path)
 # Debug: print files in repo root
 st.write("Files in repo root:", os.listdir("."))
 
