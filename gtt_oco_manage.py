@@ -4,7 +4,6 @@ from utils import integrate_post
 def show():
     st.header("Place GTT / OCO Order")
 
-    st.markdown("#### Select Order Type")
     order_type = st.radio("Choose Order Type:", ["Single GTT", "OCO"], horizontal=True)
 
     if order_type == "Single GTT":
