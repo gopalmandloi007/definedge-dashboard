@@ -16,7 +16,6 @@ PAGES = {
     "GTT": "gtt",
     "GTT/OCO Manage": "gtt_oco_manage",
     "Square Off": "squareoff",
-    "Login": "session_utils",  # <-- yaha correct karen!
     "Websocket Help": "websocket_help",
 }
 
