@@ -1,25 +1,7 @@
 import streamlit as st
 import importlib
-import os
-import sys
-import os
 
-# Fix sys.path if first entry is 'app.py', replace with current directory
-if sys.path[0].endswith("app.py"):
-    sys.path[0] = os.path.dirname(os.path.abspath(__file__))
-st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")  # <-- MUST be first
-import sys
-st.write("Python sys.path:", sys.path)
-# Debug: print files in repo root
-st.write("Files in repo root:", os.listdir("."))
-
-try:
-    import simple_chart_demo
-    st.write("Direct import of simple_chart_demo: SUCCESS")
-except Exception as e:
-    st.write(f"Direct import of simple_chart_demo failed: {e}")
-
-st.title("Definedge Integrate Dashboard")
+st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 
 PAGES = {
     "Holdings": "holdings",
@@ -38,6 +20,8 @@ PAGES = {
     "Candlestick Demo": "simple_chart_demo",
     "Websocket Help": "websocket_help",
 }
+
+st.title("Definedge Integrate Dashboard")
 
 page = st.sidebar.radio("Go to", list(PAGES.keys()))
 modulename = PAGES[page]
