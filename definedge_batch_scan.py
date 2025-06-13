@@ -6,10 +6,9 @@ import io
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
 
-# --- Helper functions copied from your working code ---
-
 @st.cache_data
 def load_master():
+    # master.csv must be present in the same directory as this script
     df = pd.read_csv("master.csv", sep="\t", header=None)
     df.columns = [
         "segment", "token", "symbol", "instrument", "series", "isin1",
@@ -58,11 +57,12 @@ def count_downdays(df, window=15):
 
 def get_time_range(days, endtime="1530"):
     to = datetime.now()
-    to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
+    try:
+        to = to.replace(hour=int(endtime[:2]), minute=int(endtime[2:]), second=0, microsecond=0)
+    except Exception:
+        pass
     frm = to - timedelta(days=days)
     return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
-
-# --- Main scan and plotting functions as previously given ---
 
 def scan_symbols(master_df, api_key, updown_window=15, days=120, ema_ltp_thr=0.95, ema_ratio_thr=0.95):
     result = []
@@ -118,7 +118,15 @@ def show():
     st.header("Definedge Batch Symbol Scanner")
 
     api_key = st.secrets.get("integrate_api_session_key", "")
-    master_df = load_master()
+    if not api_key:
+        st.error("API key not found in Streamlit secrets! Please add integrate_api_session_key.")
+        return
+
+    try:
+        master_df = load_master()
+    except Exception as e:
+        st.error(f"Error loading master.csv: {e}")
+        return
 
     st.sidebar.title("Scan filters")
     ema_ltp_thr = st.sidebar.number_input("20EMA / LTP threshold", min_value=0.8, max_value=1.5, value=0.95, step=0.01)
@@ -137,7 +145,10 @@ def show():
         row = scan_df[scan_df["Symbol"] == symbol_sel].iloc[0]
         segment, token = row["segment"], row["token"]
         from_dt, to_dt = get_time_range(days)
-        df = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
-        st.plotly_chart(plot_candlestick(df), use_container_width=True)
+        try:
+            df = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
+            st.plotly_chart(plot_candlestick(df), use_container_width=True)
+        except Exception as e:
+            st.error(f"Error fetching candle data: {e}")
 
     st.info("Adjust the filters and click 'Run Symbol Scan' to find matching symbols and visualize price action.")
