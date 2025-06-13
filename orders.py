@@ -102,12 +102,8 @@ def show():
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
-    if "order_confirm_popup" not in st.session_state:
-        st.session_state.order_confirm_popup = False
-    if "pending_order_data" not in st.session_state:
-        st.session_state.pending_order_data = None
-
-    if st.button("Review & Place Order", use_container_width=True, type="primary"):
+    # Place order directly, no popup/confirmation
+    if st.button("Place Order", use_container_width=True, type="primary"):
         data = {
             "tradingsymbol": tradingsymbol,
             "exchange": exchange,
@@ -126,61 +122,6 @@ def show():
             data["disclosed_quantity"] = int(disclosed_quantity)
         if amo:
             data["amo"] = "Yes"
-        st.session_state.pending_order_data = data
-        st.session_state.order_confirm_popup = True
-        st.experimental_rerun()
-
-    if st.session_state.get("order_confirm_popup", False):
-        st.markdown("""
-        <style>
-        .popup-bg {
-            position: fixed;
-            left: 0; top: 0; width: 100vw; height: 100vh;
-            background: rgba(0,0,0,0.30);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 99999;
-        }
-        .popup-content {
-            background: #fff;
-            border-radius: 12px;
-            padding: 26px 16px 16px 16px;
-            box-shadow: 0 2px 20px #888;
-            max-width: 310px;
-            width: 96%;
-            text-align: center;
-        }
-        .popup-btn {
-            margin: 12px 10px 0 10px;
-            min-width: 80px;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        st.markdown("""
-        <div class="popup-bg">
-            <div class="popup-content">
-                <h5>Confirm Order</h5>
-                <p>Place <b>{side}</b> {qty} x <b>{symb}</b> @ ₹{price}?</p>
-            </div>
-        </div>
-        """.format(
-            side=st.session_state.pending_order_data["order_type"],
-            qty=st.session_state.pending_order_data["quantity"],
-            symb=st.session_state.pending_order_data["tradingsymbol"],
-            price=st.session_state.pending_order_data["price"]
-        ), unsafe_allow_html=True)
-
-        colc1, colc2 = st.columns(2)
-        with colc1:
-            if st.button("Yes, Place", key="yes_place"):
-                resp = integrate_post("/placeorder", st.session_state.pending_order_data)
-                st.success("Order submitted!")
-                st.json(resp)
-                st.session_state.order_confirm_popup = False
-                st.session_state.pending_order_data = None
-                st.experimental_rerun()
-        with colc2:
-            if st.button("No, Edit", key="no_edit"):
-                st.session_state.order_confirm_popup = False
-                st.session_state.pending_order_data = None
-                st.info("Order cancelled. You can edit order details.")
-                st.experimental_rerun()
+        resp = integrate_post("/placeorder", data)
+        st.success("Order submitted!")
+        st.json(resp)
