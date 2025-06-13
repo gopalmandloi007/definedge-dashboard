@@ -13,8 +13,8 @@ PAGES = {
     "Limits": "limits",
     "Margin": "margin",
     "Quotes": "quotes",
-    "GTT": "gtt",
-    "GTT/OCO Manage": "gtt_oco_manage",
+    "GTT order manage": "gtt",           # Was "GTT"
+    "GTT Order Place": "gtt_oco_manage", # Was "GTT/OCO Manage"
     "Square Off": "squareoff",
     "Websocket Help": "websocket_help",
 }
