@@ -86,7 +86,7 @@ def show():
     df = df.sort_values("Date")
     chart_df = df.tail(60)
     fig = go.Figure(data=[go.Candlestick(
-        x=chart_df["Date"],
+        x=chart_df["Date"].dt.strftime("%Y-%m-%d"),   # string dates for category axis
         open=chart_df["Open"],
         high=chart_df["High"],
         low=chart_df["Low"],
@@ -97,7 +97,8 @@ def show():
         height=400,
         margin=dict(l=10, r=10, t=30, b=10),
         xaxis_rangeslider_visible=False,
-        title=f"{symbol} Daily Candlestick Chart"
+        title=f"{symbol} Daily Candlestick Chart",
+        xaxis=dict(type="category")  # removes Sat/Sun/holiday gaps
     )
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
