@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
+import io
 from datetime import datetime, timedelta
 
 @st.cache_data
 def load_master():
-    # Your master is tab-separated, no header in file, so set names
+    # Your master file is tab-separated with no header
     df = pd.read_csv("master.csv", sep="\t", header=None)
     df.columns = [
         "segment",      # 0
@@ -24,7 +25,7 @@ def load_master():
         "isin",         #12
         "one2"          #13
     ]
-    # Only keep needed columns for lookup
+    # Return only relevant columns for lookup
     return df[["segment", "token", "symbol", "instrument"]]
 
 def get_token(symbol, segment, master_df):
@@ -46,11 +47,13 @@ def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
     resp = requests.get(url, headers=headers)
     if resp.status_code != 200:
         raise Exception(f"API error: {resp.status_code} {resp.text}")
-    # For day/minute: Dateandtime, Open, High, Low, Close, Volume, OI
     cols = ["Dateandtime", "Open", "High", "Low", "Close", "Volume", "OI"]
-    df = pd.read_csv(pd.compat.StringIO(resp.text), header=None, names=cols)
+    df = pd.read_csv(io.StringIO(resp.text), header=None, names=cols)
     # Parse datetime
     df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d-%m-%Y %H:%M")
+    # Convert to float (in case API returns as string)
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
 def compute_ema(series, period):
@@ -70,7 +73,7 @@ def count_updays(df, window=15):
     highs = df["High"].values
     count = 0
     for i in range(-window, 0):
-        if i-1 < -len(highs):
+        if i - 1 < -len(highs):
             continue
         if highs[i] > highs[i-1]:
             count += 1
@@ -80,7 +83,7 @@ def count_downdays(df, window=15):
     lows = df["Low"].values
     count = 0
     for i in range(-window, 0):
-        if i-1 < -len(lows):
+        if i - 1 < -len(lows):
             continue
         if lows[i] < lows[i-1]:
             count += 1
