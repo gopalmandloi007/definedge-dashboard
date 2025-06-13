@@ -64,7 +64,6 @@ def highlight_pnl(val):
     return 'color: black'
 
 def show():
-    st.set_page_config(layout="wide")
     st.header("=========== Holdings Dashboard Pro ===========")
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
@@ -200,6 +199,5 @@ def show():
     except Exception as e:
         st.error(f"Error loading holdings: {e}")
 
-# For Streamlit compatibility
 if __name__ == "__main__":
     show()
