@@ -3,11 +3,9 @@ st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 import importlib
 import os  # <-- Add this line
 
-st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
-
 PAGES = {
     "Holdings": "holdings",
-    "Holdings Details": "holdings_details",   # <-- Add this line for your details page
+    "Holdings Details": "holdings_details",
     "Positions": "positions",
     "Order Book": "orderbook",
     "Orders": "orders",
