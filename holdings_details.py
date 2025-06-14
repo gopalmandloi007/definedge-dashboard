@@ -6,8 +6,6 @@ from utils import integrate_get
 import requests
 import io
 
-st.set_page_config(layout="wide")
-
 def safe_float(val):
     try:
         return float(val)
