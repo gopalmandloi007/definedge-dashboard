@@ -4,10 +4,10 @@ import requests
 from datetime import datetime, timedelta
 from utils import integrate_get
 import plotly.express as px
-import plotly.graph_objs as go
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import io
 import numpy as np
-from plotly.subplots import make_subplots
 
 # ========== Enhanced Chart Utils ==========
 @st.cache_data
@@ -63,6 +63,9 @@ def compute_rsi(data, window=14):
     
     avg_gain = gain.rolling(window=window).mean()
     avg_loss = loss.rolling(window=window).mean()
+    
+    # Handle case where avg_loss is 0 to avoid division by zero
+    avg_loss = avg_loss.replace(0, 1e-10)
     
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
@@ -161,6 +164,111 @@ def generate_insights(row, portfolio_value):
     
     return insights
 
+# ====== Minervini Sell Signals Analysis ======
+def minervini_sell_signals(df, lookback_days=15):
+    """
+    Analyze stock data for Minervini's "Sell into Strength" signals
+    Returns: dictionary of signals and warnings
+    """
+    if len(df) < lookback_days:
+        return {"error": "Insufficient data for analysis"}
+    
+    # Use the last lookback_days for analysis
+    recent = df.tail(lookback_days).copy()
+    
+    # Calculate daily price change and spread
+    recent['change'] = recent['Close'].pct_change() * 100
+    recent['spread'] = recent['High'] - recent['Low']
+    
+    # Initialize signals dictionary
+    signals = {
+        'up_days': 0,
+        'down_days': 0,
+        'up_day_percent': 0,
+        'largest_up_day': 0,
+        'largest_spread': 0,
+        'exhaustion_gap': False,
+        'high_volume_reversal': False,
+        'churning': False,
+        'heavy_volume_down': False,
+        'warnings': []
+    }
+    
+    # Count up vs down days
+    for i in range(1, len(recent)):
+        if recent['Close'].iloc[i] > recent['Close'].iloc[i-1]:
+            signals['up_days'] += 1
+        elif recent['Close'].iloc[i] < recent['Close'].iloc[i-1]:
+            signals['down_days'] += 1
+    
+    signals['up_day_percent'] = (signals['up_days'] / lookback_days) * 100
+    
+    # Identify largest up day and spread
+    signals['largest_up_day'] = recent['change'].max()
+    signals['largest_spread'] = recent['spread'].max()
+    
+    # Exhaustion gap detection
+    recent['gap_up'] = recent['Open'] > recent['High'].shift(1)
+    recent['gap_down'] = recent['Open'] < recent['Low'].shift(1)
+    recent['gap_filled'] = False
+    
+    for i in range(1, len(recent)):
+        if recent['gap_up'].iloc[i]:
+            if recent['Low'].iloc[i] <= recent['High'].shift(1).iloc[i]:
+                recent.at[recent.index[i], 'gap_filled'] = True
+                signals['exhaustion_gap'] = True
+    
+    # Volume analysis
+    avg_volume = recent['Volume'].mean()
+    max_vol_idx = recent['Volume'].idxmax()
+    
+    # High-volume reversal
+    for i in range(1, len(recent)):
+        if recent['Volume'].iloc[i] > avg_volume * 1.5:
+            # Bearish reversal: higher high but close near low
+            range_ = recent['High'].iloc[i] - recent['Low'].iloc[i]
+            if (recent['High'].iloc[i] > recent['High'].iloc[i-1] and
+                (recent['Close'].iloc[i] - recent['Low'].iloc[i]) < range_ * 0.25):
+                signals['high_volume_reversal'] = True
+                break
+    
+    # Churning (high volume without progress)
+    if recent['Volume'].iloc[-1] > avg_volume * 1.8:
+        price_change = abs(recent['Close'].iloc[-1] - recent['Open'].iloc[-1])
+        if price_change < recent['spread'].iloc[-1] * 0.15:
+            signals['churning'] = True
+    
+    # Heavy volume down day
+    if recent['Volume'].iloc[-1] > avg_volume * 1.5 and recent['change'].iloc[-1] < -3:
+        signals['heavy_volume_down'] = True
+    
+    # Generate warnings based on Minervini rules
+    if signals['up_day_percent'] >= 70:
+        signals['warnings'].append(
+            f"⚠️ {signals['up_day_percent']:.0f}% up days ({signals['up_days']}/{lookback_days}) - "
+            "Consider selling into strength"
+        )
+    
+    if signals['largest_up_day'] > 5:  # >5% up day
+        signals['warnings'].append(
+            f"⚠️ Largest up day: {signals['largest_up_day']:.2f}% - "
+            "Potential climax run"
+        )
+    
+    if signals['exhaustion_gap']:
+        signals['warnings'].append("⚠️ Exhaustion gap detected - Potential reversal signal")
+    
+    if signals['high_volume_reversal']:
+        signals['warnings'].append("⚠️ High-volume reversal - Institutional selling")
+    
+    if signals['churning']:
+        signals['warnings'].append("⚠️ Churning detected (high volume, low progress) - Distribution likely")
+    
+    if signals['heavy_volume_down']:
+        signals['warnings'].append("⚠️ Heavy volume down day - Consider exiting position")
+    
+    return signals
+
 def show():
     st.header("📊 Holdings Intelligence Dashboard")
     st.caption("Actionable insights for portfolio decisions - Hold, Add, Reduce, or Exit")
@@ -224,8 +332,8 @@ def show():
 
             today_pnl = (ltp - prev_close) * qty if (ltp is not None and prev_close) else 0.0
             overall_pnl = (ltp - avg_buy) * qty if (ltp is not None and avg_buy) else 0.0
-            pct_chg = ((ltp - prev_close) / prev_close * 100) if (ltp is not None and prev_close) else 0.0
-            pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if (ltp is not None and avg_buy) else 0.0
+            pct_chg = ((ltp - prev_close) / prev_close * 100) if (ltp is not None and prev_close and prev_close != 0) else 0.0
+            pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if (ltp is not None and avg_buy and avg_buy != 0) else 0.0
             realized_pnl = 0.0
 
             total_today_pnl += today_pnl
@@ -363,109 +471,117 @@ def show():
                             chart_df['MACD'] = macd
                             chart_df['Signal'] = signal
                         
-                        # Create main price chart
-                        fig = go.Figure()
-                        fig.add_trace(go.Candlestick(
-                            x=chart_df["Date"],
-                            open=chart_df["Open"],
-                            high=chart_df["High"],
-                            low=chart_df["Low"],
-                            close=chart_df["Close"],
-                            name="Price"
-                        ))
+                        # Determine subplot configuration
+                        rows = 1
+                        row_heights = [1.0]
+                        specs = [[{"secondary_y": True}]]
                         
-                        if show_ema:
-                            fig.add_trace(go.Scatter(
-                                x=chart_df["Date"],
-                                y=chart_df["EMA20"],
-                                mode="lines",
-                                name="20 EMA",
-                                line=dict(color="blue", width=1.5)
-                            ))
-                            fig.add_trace(go.Scatter(
-                                x=chart_df["Date"],
-                                y=chart_df["EMA50"],
-                                mode="lines",
-                                name="50 EMA",
-                                line=dict(color="orange", width=1.5)
-                            ))
+                        if show_rsi and show_macd:
+                            rows = 3
+                            row_heights = [0.6, 0.2, 0.2]
+                            specs = [[{"secondary_y": True}], [{}], [{}]]
+                        elif show_rsi or show_macd:
+                            rows = 2
+                            row_heights = [0.7, 0.3]
+                            specs = [[{"secondary_y": True}], [{}]]
                         
-                        fig.update_layout(
-                            height=400,
-                            title=f"{selected_symbol} Price Analysis",
-                            xaxis_rangeslider_visible=False,
-                            showlegend=True
+                        # Create figure with subplots
+                        fig = make_subplots(
+                            rows=rows, 
+                            cols=1,
+                            shared_xaxes=True,
+                            vertical_spacing=0.05,
+                            row_heights=row_heights,
+                            specs=specs
                         )
                         
-                        # Create subplots if needed
-                        subplot_titles = ['Price']
-                        if show_rsi or show_macd:
-                            fig = make_subplots(
-                                rows=2 if show_rsi and show_macd else 1, 
-                                cols=1,
-                                shared_xaxes=True,
-                                vertical_spacing=0.05,
-                                row_heights=[0.7, 0.3] if show_rsi and show_macd else [0.7, 0.3]
-                            )
-                            
-                            # Add price chart to first row
-                            fig.add_trace(go.Candlestick(
+                        # Price Chart (Candles + EMAs)
+                        fig.add_trace(
+                            go.Candlestick(
                                 x=chart_df["Date"],
                                 open=chart_df["Open"],
                                 high=chart_df["High"],
                                 low=chart_df["Low"],
                                 close=chart_df["Close"],
                                 name="Price"
-                            ), row=1, col=1)
-                            
-                            if show_ema:
-                                fig.add_trace(go.Scatter(
+                            ),
+                            row=1, col=1
+                        )
+                        
+                        if show_ema:
+                            fig.add_trace(
+                                go.Scatter(
                                     x=chart_df["Date"],
                                     y=chart_df["EMA20"],
                                     mode="lines",
-                                    name="20 EMA"
-                                ), row=1, col=1)
-                                fig.add_trace(go.Scatter(
+                                    name="20 EMA",
+                                    line=dict(color="blue", width=1.5)
+                                ),
+                                row=1, col=1
+                            )
+                            fig.add_trace(
+                                go.Scatter(
                                     x=chart_df["Date"],
                                     y=chart_df["EMA50"],
                                     mode="lines",
-                                    name="50 EMA"
-                                ), row=1, col=1)
-                            
-                            # Add RSI to second row
-                            if show_rsi:
-                                fig.add_trace(go.Scatter(
+                                    name="50 EMA",
+                                    line=dict(color="orange", width=1.5)
+                                ),
+                                row=1, col=1
+                            )
+                        
+                        # Add RSI to second row
+                        if show_rsi:
+                            rsi_row = 2 if not show_macd else 2
+                            fig.add_trace(
+                                go.Scatter(
                                     x=chart_df["Date"],
                                     y=chart_df["RSI"],
                                     mode="lines",
                                     name="RSI",
                                     line=dict(color="purple", width=1.5)
-                                ), row=2, col=1)
-                                fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-                                fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-                            
-                            # Add MACD if requested
-                            if show_macd:
-                                row_pos = 3 if show_rsi else 2
-                                fig.add_trace(go.Bar(
+                                ),
+                                row=rsi_row, col=1
+                            )
+                            fig.add_hline(
+                                y=30, line_dash="dash", line_color="green",
+                                row=rsi_row, col=1
+                            )
+                            fig.add_hline(
+                                y=70, line_dash="dash", line_color="red",
+                                row=rsi_row, col=1
+                            )
+                        
+                        # Add MACD if requested
+                        if show_macd:
+                            macd_row = 2 if not show_rsi else 3
+                            fig.add_trace(
+                                go.Bar(
                                     x=chart_df["Date"],
                                     y=chart_df["MACD"],
                                     name="MACD",
                                     marker_color=np.where(chart_df['MACD'] > 0, 'green', 'red')
-                                ), row=row_pos, col=1)
-                                fig.add_trace(go.Scatter(
+                                ),
+                                row=macd_row, col=1
+                            )
+                            fig.add_trace(
+                                go.Scatter(
                                     x=chart_df["Date"],
                                     y=chart_df["Signal"],
                                     mode="lines",
                                     name="Signal",
                                     line=dict(color="blue", width=1.5)
-                                ), row=row_pos, col=1)
-                            
-                            fig.update_layout(
-                                height=600,
-                                title=f"{selected_symbol} Technical Analysis",
-                                showlegend=True
+                                ),
+                                row=macd_row, col=1
                             )
+                        
+                        # Update layout
+                        fig.update_layout(
+                            height=600,
+                            title=f"{selected_symbol} Technical Analysis",
+                            showlegend=True,
+                            xaxis_rangeslider_visible=False
+                        )
                         
                         # Display the chart
                         st.plotly_chart(fig, use_container_width=True)
@@ -475,18 +591,19 @@ def show():
                         insights = []
                         
                         if show_ema:
-                            if last_row['Close'] > last_row['EMA20'] > last_row['EMA50']:
-                                insights.append("✅ Bullish trend (Price > 20EMA > 50EMA)")
-                            elif last_row['Close'] < last_row['EMA20'] < last_row['EMA50']:
-                                insights.append("❌ Bearish trend (Price < 20EMA < 50EMA)")
+                            if 'EMA20' in chart_df.columns and 'EMA50' in chart_df.columns:
+                                if last_row['Close'] > last_row['EMA20'] > last_row['EMA50']:
+                                    insights.append("✅ Bullish trend (Price > 20EMA > 50EMA)")
+                                elif last_row['Close'] < last_row['EMA20'] < last_row['EMA50']:
+                                    insights.append("❌ Bearish trend (Price < 20EMA < 50EMA)")
                         
-                        if show_rsi:
+                        if show_rsi and 'RSI' in chart_df.columns:
                             if last_row['RSI'] > 70:
                                 insights.append("⚠️ Overbought (RSI > 70)")
                             elif last_row['RSI'] < 30:
                                 insights.append("⚠️ Oversold (RSI < 30)")
                         
-                        if show_macd:
+                        if show_macd and 'MACD' in chart_df.columns and 'Signal' in chart_df.columns:
                             if last_row['MACD'] > last_row['Signal']:
                                 insights.append("↑ Bullish MACD crossover")
                             else:
@@ -496,6 +613,60 @@ def show():
                             st.subheader("Technical Insights")
                             for insight in insights:
                                 st.info(insight)
+                        
+                        # ====== MINERVINI SELL SIGNALS ANALYSIS ======
+                        st.subheader("🔔 Minervini Sell Signals Analysis")
+                        
+                        # Use the same lookback period as the chart
+                        minervini_lookback = st.slider("Analysis Lookback (days)", 7, 30, 15, key="minervini_lookback")
+                        
+                        try:
+                            signals = minervini_sell_signals(chart_df, minervini_lookback)
+                            
+                            if signals.get('error'):
+                                st.warning(signals['error'])
+                            else:
+                                # Display key metrics
+                                col1, col2, col3 = st.columns(3)
+                                col1.metric("Up Days", f"{signals['up_days']}/{minervini_lookback}")
+                                col2.metric("Up Day %", f"{signals['up_day_percent']:.1f}%")
+                                col3.metric("Largest Up Day", f"{signals['largest_up_day']:.2f}%")
+                                
+                                col4, col5, col6 = st.columns(3)
+                                col4.metric("Largest Spread", f"₹{signals['largest_spread']:.2f}")
+                                col5.metric("Exhaustion Gap", "Yes" if signals['exhaustion_gap'] else "No")
+                                col6.metric("Volume Reversal", "Yes" if signals['high_volume_reversal'] else "No")
+                                
+                                # Display warnings
+                                if signals['warnings']:
+                                    st.error("## Sell Signals Detected")
+                                    for warning in signals['warnings']:
+                                        st.error(warning)
+                                    
+                                    st.markdown("""
+                                    ### Minervini's Sell Recommendations:
+                                    - **Sell into strength** when these signals appear
+                                    - Consider **partial profits** on large gains
+                                    - **Exit completely** if multiple signals confirm
+                                    """)
+                                else:
+                                    st.success("No strong sell signals detected")
+                                    st.info("""
+                                    ### Minervini's Strength Indicators:
+                                    - Stock is showing healthy price action
+                                    - Continue monitoring for sell signals
+                                    - Consider holding until signals appear
+                                    """)
+                                    
+                                # Show recent price action table
+                                with st.expander("View Recent Price Action"):
+                                    recent = chart_df.tail(minervini_lookback).copy()
+                                    recent['Change'] = recent['Close'].pct_change() * 100
+                                    recent['Spread'] = recent['High'] - recent['Low']
+                                    st.dataframe(recent[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change', 'Spread']])
+                                    
+                        except Exception as e:
+                            st.error(f"Error in Minervini analysis: {e}")
                         
                     except Exception as e:
                         st.error(f"Error fetching chart data: {e}")
