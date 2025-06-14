@@ -9,6 +9,16 @@ from plotly.subplots import make_subplots
 import io
 import numpy as np
 
+# Initialize session state variables
+if 'deployed_capital' not in st.session_state:
+    st.session_state.deployed_capital = 650000.0
+if 'target_capital' not in st.session_state:
+    st.session_state.target_capital = 650000.0
+if 'stop_losses' not in st.session_state:
+    st.session_state.stop_losses = {}
+if 'trailing_stops' not in st.session_state:
+    st.session_state.trailing_stops = {}
+
 # ========== Enhanced Chart Utils ==========
 @st.cache_data
 def load_master():
@@ -135,6 +145,17 @@ def highlight_pnl(val):
     except:
         pass
     return 'color: black'
+
+def highlight_risk(val):
+    try:
+        val = float(val)
+        if val > 0:
+            return 'background-color: #FFEB3B; color: black'  # Yellow for risk
+        elif val < 0:
+            return 'background-color: #F44336; color: white'  # Red for below SL
+    except:
+        pass
+    return ''
 
 def generate_insights(row, portfolio_value):
     """Generate actionable insights based on position metrics"""
@@ -269,41 +290,37 @@ def minervini_sell_signals(df, lookback_days=15):
     return signals
 
 def show():
+    st.set_page_config(layout="wide")  # Set full-screen layout
+    
     st.header("📊 Portfolio Intelligence Dashboard")
     st.caption("Advanced portfolio management with capital allocation and Minervini exit signals")
 
-   # Initialize session state for capital management
-if 'deployed_capital' not in st.session_state:
-    st.session_state.deployed_capital = 650000.0
-if 'target_capital' not in st.session_state:
-    st.session_state.target_capital = 650000.0
+    api_session_key = st.secrets.get("integrate_api_session_key", "")
+    auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
 
-api_session_key = st.secrets.get("integrate_api_session_key", "")
-auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
-
-# Capital Management Section
-st.sidebar.header("💰 Capital Management")
-
-# Use the session state values as defaults, but don't reassign after widget creation
-deployed_capital_input = st.sidebar.number_input(
-    "Total Deployed Capital (₹)", 
-    min_value=0.0, 
-    value=st.session_state.deployed_capital, 
-    step=10000.0,
-    key='deployed_capital'
-)
-
-target_capital_input = st.sidebar.number_input(
-    "Target Deployment (₹)", 
-    min_value=0.0, 
-    value=st.session_state.target_capital, 
-    step=10000.0,
-    key='target_capital'
-)
-
-# If you need to use updated values in logic, use the local variables:
-# deployed_capital_input and target_capital_input
-
+    # Capital Management Section
+    st.sidebar.header("💰 Capital Management")
+    deployed_capital = st.sidebar.number_input(
+        "Total Deployed Capital (₹)", 
+        min_value=0.0, 
+        value=st.session_state.deployed_capital, 
+        step=10000.0,
+        key='deployed_capital_input'
+    )
+    st.session_state.deployed_capital = deployed_capital
+    
+    target_capital = st.sidebar.number_input(
+        "Target Deployment (₹)", 
+        min_value=0.0, 
+        value=st.session_state.target_capital, 
+        step=10000.0,
+        key='target_capital_input'
+    )
+    st.session_state.target_capital = target_capital
+    
+    # Stop Loss Management
+    st.sidebar.header("🛑 Stop Loss Management")
+    st.sidebar.info("Default stop loss is 2% below entry price")
     
     # Load master for chart lookup
     master_df = load_master()
@@ -332,8 +349,10 @@ target_capital_input = st.sidebar.number_input(
         total_overall_pnl = 0.0
         total_invested = 0.0
         total_current = 0.0
+        total_risk_amount = 0.0
 
         symbol_segment_dict = {}
+        symbol_data = {}  # Store data for batch Minervini analysis
 
         for h in active_holdings:
             ts = h.get("tradingsymbol")
@@ -370,6 +389,23 @@ target_capital_input = st.sidebar.number_input(
             total_invested += invested
             total_current += current
 
+            # Initialize stop loss if not set
+            if tsym not in st.session_state.stop_losses:
+                st.session_state.stop_losses[tsym] = avg_buy * 0.98  # 2% below entry
+            
+            # Calculate risk
+            risk_amount = (ltp - st.session_state.stop_losses[tsym]) * qty if ltp else 0
+            risk_percent = (risk_amount / invested * 100) if invested else 0
+            total_risk_amount += risk_amount
+
+            # Store for Minervini analysis
+            symbol_data[tsym] = {
+                'exchange': exch,
+                'token': token,
+                'avg_buy': avg_buy,
+                'qty': qty
+            }
+
             rows.append([
                 tsym,
                 round(ltp, 2) if ltp is not None else "N/A",
@@ -383,6 +419,9 @@ target_capital_input = st.sidebar.number_input(
                 round(pct_chg_avg, 2) if ltp is not None else "N/A",
                 round(invested, 2) if invested else "N/A",
                 round(current, 2) if current else "N/A",
+                round(st.session_state.stop_losses[tsym], 2),
+                round(risk_amount, 2),
+                round(risk_percent, 2),
                 exch,
                 isin,
             ])
@@ -392,7 +431,8 @@ target_capital_input = st.sidebar.number_input(
 
         headers = [
             "Symbol", "LTP", "Avg Buy", "Qty", "P.Close", "%Chg", "Today P&L", "Overall P&L",
-            "Realized P&L", "%Chg Avg", "Invested", "Current", "Exchange", "ISIN"
+            "Realized P&L", "%Chg Avg", "Invested", "Current", "Stop Loss", "Risk Amt", "Risk %",
+            "Exchange", "ISIN"
         ]
 
         df = pd.DataFrame(rows, columns=headers)
@@ -401,6 +441,16 @@ target_capital_input = st.sidebar.number_input(
         # Calculate portfolio percentage
         portfolio_value = df['Current'].sum()
         df['Portfolio %'] = (df['Current'] / portfolio_value * 100).round(2)
+
+        # ADD ACTION COLUMN BASED ON METRICS
+        df['Action'] = "HOLD"
+        df.loc[df['%Chg Avg'] > 25, 'Action'] = "CONSIDER PARTIAL PROFIT"
+        df.loc[df['%Chg Avg'] < -15, 'Action'] = "REVIEW STOP LOSS"
+        df.loc[df['Portfolio %'] > 15, 'Action'] = "CONSIDER REDUCE"
+        df.loc[(df['%Chg'] < -5) & (df['%Chg Avg'] < -10), 'Action'] = "MONITOR CLOSELY"
+
+        # ADD INSIGHTS COLUMN
+        df['Insights'] = df.apply(lambda row: generate_insights(row, portfolio_value), axis=1)
 
         # Calculate cash position and allocation metrics
         cash_in_hand = st.session_state.deployed_capital - total_invested
@@ -418,15 +468,12 @@ target_capital_input = st.sidebar.number_input(
         col4.metric("Allocation %", f"{allocation_percent:.1f}%", 
                    f"₹{portfolio_value:,.0f} invested")
         
-        # ADD ACTION COLUMN BASED ON METRICS
-        df['Action'] = "HOLD"
-        df.loc[df['%Chg Avg'] > 25, 'Action'] = "CONSIDER PARTIAL PROFIT"
-        df.loc[df['%Chg Avg'] < -15, 'Action'] = "REVIEW STOP LOSS"
-        df.loc[df['Portfolio %'] > 15, 'Action'] = "CONSIDER REDUCE"
-        df.loc[(df['%Chg'] < -5) & (df['%Chg Avg'] < -10), 'Action'] = "MONITOR CLOSELY"
-
-        # ADD INSIGHTS COLUMN
-        df['Insights'] = df.apply(lambda row: generate_insights(row, portfolio_value), axis=1)
+        # Risk Summary
+        st.subheader("🚨 Risk Exposure")
+        col5, col6, col7 = st.columns(3)
+        col5.metric("Total At Risk", f"₹{total_risk_amount:,.0f}")
+        col6.metric("Risk % of Portfolio", f"{total_risk_amount/portfolio_value*100:.1f}%" if portfolio_value else "0%")
+        col7.metric("Risk % of Deployed", f"{total_risk_amount/st.session_state.deployed_capital*100:.1f}%" if st.session_state.deployed_capital else "0%")
 
         # Search/Filter Box for Symbols
         search = st.text_input("🔍 Search Symbol (filter):")
@@ -456,15 +503,15 @@ target_capital_input = st.sidebar.number_input(
                 risk_df['%Chg Avg'] < -10, 3, 
                 np.where(risk_df['Portfolio %'] > 10, 2, 1)
             )
-            fig = px.bar(risk_df, x='Symbol', y='Current', color='Risk Score',
-                         title="Risk Exposure (Size & Performance)",
+            fig = px.bar(risk_df, x='Symbol', y='Risk Amt', color='Risk Score',
+                         title="Risk Exposure by Stock",
                          color_continuous_scale="RdYlGn_r")
             st.plotly_chart(fig, use_container_width=True)
 
         # Enhanced Holdings Table with Actionable Columns
         st.subheader("📝 Holdings Analysis")
         
-        # Color formatting for action column
+        # Color formatting
         def color_action(val):
             if "PROFIT" in val: return 'background-color: #4CAF50; color: white'
             if "REDUCE" in val: return 'background-color: #FF9800'
@@ -474,21 +521,89 @@ target_capital_input = st.sidebar.number_input(
         
         styled_df = df.style.applymap(highlight_pnl, 
             subset=["Today P&L", "Overall P&L", "%Chg", "%Chg Avg"]
-        ).applymap(color_action, subset=["Action"])
+        ).applymap(color_action, subset=["Action"]
+        ).applymap(highlight_risk, subset=["Risk Amt", "Risk %"])
         
         st.dataframe(
             styled_df,
             use_container_width=True,
-            column_order=["Symbol", "LTP", "Avg Buy", "%Chg", "%Chg Avg", 
-                          "Today P&L", "Overall P&L", "Portfolio %", "Action"]
+            height=800,
+            column_order=["Symbol", "LTP", "Avg Buy", "Stop Loss", "Risk Amt", "Risk %", 
+                          "%Chg", "%Chg Avg", "Portfolio %", "Action"]
         )
+
+        # Batch Minervini Analysis for All Holdings
+        st.subheader("🔔 Batch Minervini Analysis for All Holdings")
+        
+        if st.button("Run Minervini Analysis for All Stocks"):
+            minervini_results = []
+            progress_bar = st.progress(0)
+            
+            symbols = list(symbol_data.keys())
+            for i, symbol in enumerate(symbols):
+                data = symbol_data[symbol]
+                segment = data['exchange']
+                token = data['token']
+                
+                # Update progress
+                progress_bar.progress((i + 1) / len(symbols))
+                
+                if token:
+                    from_dt, to_dt = get_time_range(90)  # 90 days lookback
+                    try:
+                        chart_df = fetch_candles_definedge(segment, token, from_dt, to_dt, api_key=api_session_key)
+                        signals = minervini_sell_signals(chart_df, 15)
+                        
+                        if signals.get('error'):
+                            minervini_results.append({
+                                'Symbol': symbol,
+                                'Status': 'Error',
+                                'Warnings': signals['error'],
+                                'Signal Count': 0
+                            })
+                        else:
+                            minervini_results.append({
+                                'Symbol': symbol,
+                                'Status': 'Success',
+                                'Warnings': " | ".join(signals['warnings']),
+                                'Signal Count': len(signals['warnings'])
+                            })
+                    except Exception as e:
+                        minervini_results.append({
+                            'Symbol': symbol,
+                            'Status': 'Error',
+                            'Warnings': str(e),
+                            'Signal Count': 0
+                        })
+                else:
+                    minervini_results.append({
+                        'Symbol': symbol,
+                        'Status': 'Error',
+                        'Warnings': 'Token not found',
+                        'Signal Count': 0
+                    })
+            
+            # Display results
+            results_df = pd.DataFrame(minervini_results)
+            results_df = results_df.sort_values("Signal Count", ascending=False)
+            
+            st.subheader("Analysis Results")
+            st.dataframe(results_df, use_container_width=True, height=500)
+            
+            # Highlight stocks with warnings
+            if not results_df.empty:
+                warning_stocks = results_df[results_df['Signal Count'] > 0]
+                if not warning_stocks.empty:
+                    st.warning("### Stocks with Sell Signals")
+                    for _, row in warning_stocks.iterrows():
+                        st.error(f"**{row['Symbol']}**: {row['Warnings']}")
 
         # ========== ENHANCED CHART SECTION ==========
         st.subheader("📈 Technical Analysis for Decision Support")
         holding_symbols = list(symbol_segment_dict.keys())
         
         if holding_symbols:
-            col1, col2 = st.columns([1, 2])
+            col1, col2 = st.columns([1, 3])
             with col1:
                 selected_symbol = st.selectbox("Select Holding", sorted(holding_symbols))
                 segment = symbol_segment_dict[selected_symbol]
@@ -499,6 +614,35 @@ target_capital_input = st.sidebar.number_input(
                 show_rsi = st.checkbox("RSI Indicator", value=True)
                 show_macd = st.checkbox("MACD", value=True)
                 days_back = st.slider("Days to Show", 30, 365, 90)
+                
+                # Stop Loss Configuration
+                st.subheader("Stop Loss Configuration")
+                current_sl = st.session_state.stop_losses.get(selected_symbol, 0)
+                new_sl = st.number_input("Stop Loss Price", 
+                                        value=current_sl, 
+                                        step=0.5,
+                                        key=f"sl_{selected_symbol}")
+                
+                if st.button("Update Stop Loss"):
+                    st.session_state.stop_losses[selected_symbol] = new_sl
+                    st.success(f"Stop loss updated for {selected_symbol}!")
+                
+                # Trailing Stop Configuration
+                st.subheader("Trailing Stop")
+                trailing_active = st.checkbox("Enable Trailing Stop", 
+                                            value=st.session_state.trailing_stops.get(selected_symbol, {}).get('active', False))
+                trail_percent = st.number_input("Trail Percentage", 
+                                              min_value=0.1, 
+                                              max_value=20.0, 
+                                              value=st.session_state.trailing_stops.get(selected_symbol, {}).get('percent', 3.0),
+                                              step=0.5)
+                
+                if st.button("Update Trailing Stop"):
+                    st.session_state.trailing_stops[selected_symbol] = {
+                        'active': trailing_active,
+                        'percent': trail_percent
+                    }
+                    st.success(f"Trailing stop updated for {selected_symbol}!")
                 
                 if token:
                     from_dt, to_dt = get_time_range(days_back)
@@ -551,6 +695,15 @@ target_capital_input = st.sidebar.number_input(
                                 close=chart_df["Close"],
                                 name="Price"
                             ),
+                            row=1, col=1
+                        )
+                        
+                        # Add stop loss line
+                        fig.add_hline(
+                            y=new_sl, 
+                            line_dash="dash", 
+                            line_color="red",
+                            name="Stop Loss",
                             row=1, col=1
                         )
                         
