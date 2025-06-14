@@ -79,10 +79,11 @@ def show():
 
     # --- Pie Chart: Allocation (with Cash in Hand) ---
     df_pie = df[["Symbol", "Invested"]].copy()
-    df_pie = df_pie.append(
-        {"Symbol": "Cash in Hand", "Invested": cash_in_hand},
-        ignore_index=True
-    )
+    df_pie = pd.concat([
+        df_pie,
+        pd.DataFrame([{"Symbol": "Cash in Hand", "Invested": cash_in_hand}])
+    ], ignore_index=True)
+
     st.subheader("Portfolio Allocation Pie (with Cash)")
     fig = px.pie(
         df_pie,
