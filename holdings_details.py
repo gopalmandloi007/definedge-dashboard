@@ -382,7 +382,7 @@ def show():
             try:
                 chart_df = fetch_candles_definedge(segment, token, from_dt, to_dt, api_key=api_session_key)
                 chart_df = chart_df.sort_values("Date")
-                chart_df = chart_df[chart_df["Date"] <= pd.Timestamp.now()]  # Remove future
+                chart_df = chart_df[chart_df["Date"] <= pd.Timestamp.now()]
                 if show_ema:
                     chart_df['EMA20'] = chart_df['Close'].ewm(span=20, adjust=False).mean()
                     chart_df['EMA50'] = chart_df['Close'].ewm(span=50, adjust=False).mean()
@@ -489,7 +489,7 @@ def show():
                     height=900,
                     title=f"{selected_symbol} Technical Analysis",
                     showlegend=True,
-                    xaxis=dict(type="category"),  # Remove holiday/future gaps
+                    xaxis=dict(type="category"),
                     xaxis_rangeslider_visible=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -504,6 +504,20 @@ def show():
                         st.error(warning)
                 else:
                     st.success("No strong sell signals detected")
+                # ---- Minervini Recent Price Action Table ----
+                recent = chart_df.tail(minervini_lookback).copy()
+                recent['Change'] = recent['Close'].pct_change() * 100
+                recent['Spread'] = recent['High'] - recent['Low']
+                recent_table = recent[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change', 'Spread']].copy()
+                recent_table['Date'] = recent_table['Date'].dt.strftime('%Y-%m-%d')
+                st.markdown(f"#### Recent Price Action (last {minervini_lookback} days)")
+                st.dataframe(
+                    recent_table.style.applymap(
+                        lambda x: 'color:green' if isinstance(x, float) and x > 0 else ('color:red' if isinstance(x, float) and x < 0 else ''),
+                        subset=["Change"]
+                    ),
+                    use_container_width=True
+                )
 
             except Exception as e:
                 st.error(f"Error fetching chart data: {e}")
