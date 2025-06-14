@@ -77,13 +77,18 @@ def show():
     colB.metric("Invested", f"₹{total_invested:,.0f}", f"{allocation_percent:.1f}%")
     colC.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}")
 
-    # --- Pie Chart: Allocation ---
-    st.subheader("Portfolio Allocation Pie")
+    # --- Pie Chart: Allocation (with Cash in Hand) ---
+    df_pie = df[["Symbol", "Invested"]].copy()
+    df_pie = df_pie.append(
+        {"Symbol": "Cash in Hand", "Invested": cash_in_hand},
+        ignore_index=True
+    )
+    st.subheader("Portfolio Allocation Pie (with Cash)")
     fig = px.pie(
-        df,
+        df_pie,
         names="Symbol",
         values="Invested",
-        title="Allocation by Stock",
+        title="Allocation by Stock & Cash",
         hole=0.3
     )
     fig.update_traces(textinfo='label+percent')
@@ -107,4 +112,4 @@ def show():
     col3.metric("Total P&L", f"₹{df['P&L'].sum():,.0f}")
     col4.metric("Total Qty", f"{df['Qty'].sum():,.0f}")
 
-    st.info("Saare symbol ab clearly dikhenge. Agar fir bhi object aaye toh API data format bhejein.")
+    st.info("The allocation pie now includes Cash in Hand for a true portfolio breakdown.")
