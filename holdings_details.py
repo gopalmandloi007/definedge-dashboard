@@ -16,7 +16,21 @@ def show():
     # --- Prepare DataFrame with all details ---
     rows = []
     for h in holdings:
+        # --- Robust symbol extraction ---
         ts = h.get("tradingsymbol")
+        if isinstance(ts, list):
+            if ts:
+                if isinstance(ts[0], dict):
+                    tsym = ts[0].get("tradingsymbol", "N/A")
+                else:
+                    tsym = str(ts[0])
+            else:
+                tsym = "N/A"
+        elif isinstance(ts, dict):
+            tsym = ts.get("tradingsymbol", "N/A")
+        else:
+            tsym = str(ts) if ts is not None else "N/A"
+
         exch = h.get("exchange", "NSE")
         isin = h.get("isin", "")
         product = h.get("product", "")
@@ -30,7 +44,7 @@ def show():
         pnl = current_value - invested
 
         rows.append({
-            "Symbol": ts,
+            "Symbol": tsym,
             "Exchange": exch,
             "ISIN": isin,
             "Product": product,
@@ -93,4 +107,4 @@ def show():
     col3.metric("Total P&L", f"₹{df['P&L'].sum():,.0f}")
     col4.metric("Total Qty", f"{df['Qty'].sum():,.0f}")
 
-    st.info("Sabhi details aur dashboard features upar dikh rahe hain. Agar aur bhi summary ya chart chahiye, batao!")
+    st.info("Saare symbol ab clearly dikhenge. Agar fir bhi object aaye toh API data format bhejein.")
