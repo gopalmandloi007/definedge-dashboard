@@ -9,7 +9,6 @@ import numpy as np
 import io
 from utils import integrate_get
 
-# ========== Chart & Data Utils ==========
 @st.cache_data
 def load_master():
     df = pd.read_csv("master.csv", sep="\t", header=None)
@@ -131,7 +130,6 @@ def highlight_pnl(val):
         pass
     return ''
 
-# ========== Minervini Sell Signals ==========
 def minervini_sell_signals(df, lookback_days=15):
     if len(df) < lookback_days:
         return {"error": "Insufficient data for analysis"}
@@ -200,7 +198,13 @@ def minervini_sell_signals(df, lookback_days=15):
         signals['warnings'].append("⚠️ Heavy volume down day - Consider exiting position")
     return signals
 
-# ========== MAIN DASHBOARD ==========
+def open_risk_status(open_risk):
+    if open_risk <= 0:
+        return "Risk Free (Profit Locked)"
+    else:
+        return "At Risk"
+
+# ================== MAIN DASHBOARD ==================
 def show():
     st.title("Holdings Details Dashboard")
 
@@ -214,10 +218,8 @@ def show():
         st.warning("No holdings found.")
         return
 
-    # --- Prepare DataFrame with all details with TRUE LTP fetch ---
     rows = []
     for h in holdings:
-        # Symbol extraction (robust)
         ts = h.get("tradingsymbol")
         if isinstance(ts, list):
             if ts:
@@ -248,13 +250,11 @@ def show():
         entry = float(h.get("avg_buy_price", 0) or 0)
         invested = entry * qty
 
-        # LTP fetch using API!
         token = get_token(tsym, segment, master_df)
         ltp = get_ltp(exch, token, api_session_key) if token else None
         if not ltp or ltp == 0:
             ltp = get_prev_close(exch, token, api_session_key) if token else None
 
-        # Calculate P&L only if LTP is available and >0
         if ltp and ltp > 0:
             current_value = ltp * qty
             pnl = current_value - invested
@@ -262,11 +262,10 @@ def show():
             current_value = ""
             pnl = ""
 
-        # --- TRAILING STOP LOSS LOGIC ---
+        # --- Trailing SL logic ---
         initial_sl = round(entry * 0.97, 2)
         status = "Initial SL"
         trailing_sl = initial_sl
-
         if ltp and ltp > 0:
             change_pct = 100 * (ltp - entry) / entry if entry else 0
             if change_pct >= 30:
@@ -282,6 +281,7 @@ def show():
             change_pct = ""
 
         open_risk = (trailing_sl - entry) * qty
+        open_risk_label = open_risk_status(open_risk)
 
         rows.append({
             "Symbol": tsym,
@@ -298,6 +298,7 @@ def show():
             "Status": status,
             "Stop Loss": trailing_sl,
             "Open Risk": open_risk,
+            "Open Risk Status": open_risk_label,
             "DP Free Qty": h.get("dp_free_qty", ""),
             "Pledge Qty": h.get("pledge_qty", ""),
             "Collateral Qty": h.get("collateral_qty", ""),
@@ -349,6 +350,13 @@ def show():
         use_container_width=True,
     )
 
+    # --- Table for Open Risk Status ---
+    st.write("#### 🟢 Open Risk Status: If **'Risk Free (Profit Locked)'** hai, toh stoploss pe bhi minimum profit locked hai!")
+    st.dataframe(
+        df[["Symbol", "Entry", "Stop Loss", "Open Risk", "Open Risk Status"]],
+        use_container_width=True
+    )
+
     # --- Totals Summary ---
     st.subheader("Summary")
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -366,20 +374,17 @@ def show():
         "If gain >30%, SL = Entry +20% (Excellent Profit)."
     )
 
-    # ================== Chart & Mark Minervini Analysis ==================
+    # ================== Chart & Mark Minervini Analysis (Full Width, Vertical) ==================
     st.subheader("📈 Technical Analysis & Minervini Sell Signals")
     holding_symbols = df["Symbol"].unique()
     if len(holding_symbols):
-        chart_col, info_col = st.columns([2, 1])
-        with info_col:
-            selected_symbol = st.selectbox("Select Holding for Chart", sorted(holding_symbols))
-            # Segment for token lookup, default to NSE or use exchange if available
-            segment = df[df["Symbol"] == selected_symbol]["Exchange"].values[0] if not df[df["Symbol"] == selected_symbol].empty else "NSE"
-            token = get_token(selected_symbol, segment, master_df)
-            show_ema = st.checkbox("Show EMAs", value=True)
-            show_rsi = st.checkbox("Show RSI", value=True)
-            show_macd = st.checkbox("Show MACD", value=True)
-            days_back = st.slider("Chart Days", 30, 365, 90)
+        selected_symbol = st.selectbox("Select Holding for Chart", sorted(holding_symbols))
+        segment = df[df["Symbol"] == selected_symbol]["Exchange"].values[0] if not df[df["Symbol"] == selected_symbol].empty else "NSE"
+        token = get_token(selected_symbol, segment, master_df)
+        show_ema = st.checkbox("Show EMAs", value=True)
+        show_rsi = st.checkbox("Show RSI", value=True)
+        show_macd = st.checkbox("Show MACD", value=True)
+        days_back = st.slider("Chart Days", 30, 365, 90)
         if token:
             from_dt, to_dt = get_time_range(days_back)
             try:
@@ -394,107 +399,108 @@ def show():
                     macd, signal = compute_macd(chart_df)
                     chart_df['MACD'] = macd
                     chart_df['Signal'] = signal
-                with chart_col:
-                    rows_chart = 1
-                    row_heights = [1.0]
-                    specs = [[{"secondary_y": True}]]
-                    if show_rsi and show_macd:
-                        rows_chart = 3
-                        row_heights = [0.6, 0.2, 0.2]
-                        specs = [[{"secondary_y": True}], [{}], [{}]]
-                    elif show_rsi or show_macd:
-                        rows_chart = 2
-                        row_heights = [0.7, 0.3]
-                        specs = [[{"secondary_y": True}], [{}]]
-                    fig = make_subplots(
-                        rows=rows_chart, 
-                        cols=1,
-                        shared_xaxes=True,
-                        vertical_spacing=0.05,
-                        row_heights=row_heights,
-                        specs=specs
-                    )
+
+                # --- FULL WIDTH, STACKED CHARTS ---
+                rows_chart = 1
+                row_heights = [1.0]
+                specs = [[{"secondary_y": True}]]
+                if show_rsi and show_macd:
+                    rows_chart = 3
+                    row_heights = [0.6, 0.2, 0.2]
+                    specs = [[{"secondary_y": True}], [{}], [{}]]
+                elif show_rsi or show_macd:
+                    rows_chart = 2
+                    row_heights = [0.7, 0.3]
+                    specs = [[{"secondary_y": True}], [{}]]
+                fig = make_subplots(
+                    rows=rows_chart, 
+                    cols=1,
+                    shared_xaxes=True,
+                    vertical_spacing=0.05,
+                    row_heights=row_heights,
+                    specs=specs
+                )
+                fig.add_trace(
+                    go.Candlestick(
+                        x=chart_df["Date"],
+                        open=chart_df["Open"],
+                        high=chart_df["High"],
+                        low=chart_df["Low"],
+                        close=chart_df["Close"],
+                        name="Price"
+                    ),
+                    row=1, col=1
+                )
+                if show_ema:
                     fig.add_trace(
-                        go.Candlestick(
+                        go.Scatter(
                             x=chart_df["Date"],
-                            open=chart_df["Open"],
-                            high=chart_df["High"],
-                            low=chart_df["Low"],
-                            close=chart_df["Close"],
-                            name="Price"
+                            y=chart_df["EMA20"],
+                            mode="lines",
+                            name="20 EMA",
+                            line=dict(color="blue", width=1.5)
                         ),
                         row=1, col=1
                     )
-                    if show_ema:
-                        fig.add_trace(
-                            go.Scatter(
-                                x=chart_df["Date"],
-                                y=chart_df["EMA20"],
-                                mode="lines",
-                                name="20 EMA",
-                                line=dict(color="blue", width=1.5)
-                            ),
-                            row=1, col=1
-                        )
-                        fig.add_trace(
-                            go.Scatter(
-                                x=chart_df["Date"],
-                                y=chart_df["EMA50"],
-                                mode="lines",
-                                name="50 EMA",
-                                line=dict(color="orange", width=1.5)
-                            ),
-                            row=1, col=1
-                        )
-                    if show_rsi:
-                        rsi_row = 2 if not show_macd else 2
-                        fig.add_trace(
-                            go.Scatter(
-                                x=chart_df["Date"],
-                                y=chart_df["RSI"],
-                                mode="lines",
-                                name="RSI",
-                                line=dict(color="purple", width=1.5)
-                            ),
-                            row=rsi_row, col=1
-                        )
-                        fig.add_hline(
-                            y=30, line_dash="dash", line_color="green",
-                            row=rsi_row, col=1
-                        )
-                        fig.add_hline(
-                            y=70, line_dash="dash", line_color="red",
-                            row=rsi_row, col=1
-                        )
-                    if show_macd:
-                        macd_row = 2 if not show_rsi else 3
-                        fig.add_trace(
-                            go.Bar(
-                                x=chart_df["Date"],
-                                y=chart_df["MACD"],
-                                name="MACD",
-                                marker_color=np.where(chart_df['MACD'] > 0, 'green', 'red')
-                            ),
-                            row=macd_row, col=1
-                        )
-                        fig.add_trace(
-                            go.Scatter(
-                                x=chart_df["Date"],
-                                y=chart_df["Signal"],
-                                mode="lines",
-                                name="Signal",
-                                line=dict(color="blue", width=1.5)
-                            ),
-                            row=macd_row, col=1
-                        )
-                    fig.update_layout(
-                        height=600,
-                        title=f"{selected_symbol} Technical Analysis",
-                        showlegend=True,
-                        xaxis_rangeslider_visible=False
+                    fig.add_trace(
+                        go.Scatter(
+                            x=chart_df["Date"],
+                            y=chart_df["EMA50"],
+                            mode="lines",
+                            name="50 EMA",
+                            line=dict(color="orange", width=1.5)
+                        ),
+                        row=1, col=1
                     )
-                    st.plotly_chart(fig, use_container_width=True)
-                # Minervini block (always below chart)
+                if show_rsi:
+                    rsi_row = 2 if not show_macd else 2
+                    fig.add_trace(
+                        go.Scatter(
+                            x=chart_df["Date"],
+                            y=chart_df["RSI"],
+                            mode="lines",
+                            name="RSI",
+                            line=dict(color="purple", width=1.5)
+                        ),
+                        row=rsi_row, col=1
+                    )
+                    fig.add_hline(
+                        y=30, line_dash="dash", line_color="green",
+                        row=rsi_row, col=1
+                    )
+                    fig.add_hline(
+                        y=70, line_dash="dash", line_color="red",
+                        row=rsi_row, col=1
+                    )
+                if show_macd:
+                    macd_row = 2 if not show_rsi else 3
+                    fig.add_trace(
+                        go.Bar(
+                            x=chart_df["Date"],
+                            y=chart_df["MACD"],
+                            name="MACD",
+                            marker_color=np.where(chart_df['MACD'] > 0, 'green', 'red')
+                        ),
+                        row=macd_row, col=1
+                    )
+                    fig.add_trace(
+                        go.Scatter(
+                            x=chart_df["Date"],
+                            y=chart_df["Signal"],
+                            mode="lines",
+                            name="Signal",
+                            line=dict(color="blue", width=1.5)
+                        ),
+                        row=macd_row, col=1
+                    )
+                fig.update_layout(
+                    height=800, # Chart aur bada kar diya!
+                    title=f"{selected_symbol} Technical Analysis",
+                    showlegend=True,
+                    xaxis_rangeslider_visible=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
                 st.markdown("#### Minervini Sell Signals")
                 minervini_lookback = st.slider("Analysis Lookback (days)", 7, 30, 15, key="minervini_lookback")
                 try:
