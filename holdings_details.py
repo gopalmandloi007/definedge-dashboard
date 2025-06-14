@@ -50,27 +50,16 @@ if df.empty:
     st.warning("No active holdings with quantity > 0.")
     st.stop()
 
-# --- Capital Management (top, not sidebar) ---
-if "total_capital" not in st.session_state:
-    st.session_state.total_capital = 650000.0
+# --- Capital Management (Top, not editable, always 650000) ---
+TOTAL_CAPITAL = 650000.0
+
+total_invested = df["Invested"].sum()
+cash_in_hand = max(TOTAL_CAPITAL - total_invested, 0)
+allocation_percent = (total_invested / TOTAL_CAPITAL * 100) if TOTAL_CAPITAL else 0
 
 st.subheader("💰 Capital Management")
-total_capital = st.number_input(
-    "Total Capital (Invested + Cash)",
-    min_value=1.0,  # Avoid zero for division
-    value=st.session_state.total_capital,
-    step=10000.0,
-    key="total_capital_input"
-)
-st.session_state.total_capital = total_capital
-
-# Recalculate invested, cash and allocation %
-total_invested = df["Invested"].sum()
-cash_in_hand = max(st.session_state.total_capital - total_invested, 0)
-allocation_percent = (total_invested / st.session_state.total_capital * 100) if st.session_state.total_capital else 0
-
 colA, colB, colC = st.columns(3)
-colA.metric("Total Capital", f"₹{st.session_state.total_capital:,.0f}")
+colA.metric("Total Capital", f"₹{TOTAL_CAPITAL:,.0f}")
 colB.metric("Invested", f"₹{total_invested:,.0f}", f"{allocation_percent:.1f}%")
 colC.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}")
 
@@ -124,7 +113,7 @@ total_risk = edited_df["Open Risk"].sum()
 st.subheader("Risk Analysis")
 col1, col2 = st.columns(2)
 col1.metric("Total Open Risk", f"₹{total_risk:,.0f}")
-col2.metric("Risk % of Total Capital", f"{(total_risk/st.session_state.total_capital*100):.2f}%" if st.session_state.total_capital else "0%")
+col2.metric("Risk % of Total Capital", f"{(total_risk/TOTAL_CAPITAL*100):.2f}%" if TOTAL_CAPITAL else "0%")
 
 # --- Pie Chart: Risk Distribution ---
 st.subheader("Risk Distribution Pie")
