@@ -50,12 +50,12 @@ if df.empty:
     st.warning("No active holdings with quantity > 0.")
     st.stop()
 
-# --- Capital Management ---
-st.sidebar.header("💰 Capital Management")
+# --- Capital Management (top, not sidebar) ---
 if "total_capital" not in st.session_state:
-    st.session_state.total_capital = 650000.0  # Default as per your requirement
+    st.session_state.total_capital = 650000.0
 
-total_capital = st.sidebar.number_input(
+st.subheader("💰 Capital Management")
+total_capital = st.number_input(
     "Total Capital (Invested + Cash)",
     min_value=1.0,  # Avoid zero for division
     value=st.session_state.total_capital,
@@ -73,6 +73,18 @@ colA, colB, colC = st.columns(3)
 colA.metric("Total Capital", f"₹{st.session_state.total_capital:,.0f}")
 colB.metric("Invested", f"₹{total_invested:,.0f}", f"{allocation_percent:.1f}%")
 colC.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}")
+
+# --- Pie Chart: Allocation (at the top) ---
+st.subheader("Portfolio Allocation Pie")
+fig = px.pie(
+    df, 
+    names="Symbol", 
+    values="Invested", 
+    title="Allocation by Stock", 
+    hole=0.3
+)
+fig.update_traces(textinfo='label+percent')
+st.plotly_chart(fig, use_container_width=True)
 
 # --- Stop Loss Table ---
 st.subheader("🛑 Bulk Stop Loss Table (Editable)")
@@ -113,18 +125,6 @@ st.subheader("Risk Analysis")
 col1, col2 = st.columns(2)
 col1.metric("Total Open Risk", f"₹{total_risk:,.0f}")
 col2.metric("Risk % of Total Capital", f"{(total_risk/st.session_state.total_capital*100):.2f}%" if st.session_state.total_capital else "0%")
-
-# --- Pie Chart: Allocation ---
-st.subheader("Portfolio Allocation Pie")
-fig = px.pie(
-    edited_df, 
-    names="Symbol", 
-    values="Invested", 
-    title="Allocation by Stock", 
-    hole=0.3
-)
-fig.update_traces(textinfo='label+percent')
-st.plotly_chart(fig, use_container_width=True)
 
 # --- Pie Chart: Risk Distribution ---
 st.subheader("Risk Distribution Pie")
