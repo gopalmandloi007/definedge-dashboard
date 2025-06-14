@@ -272,32 +272,38 @@ def show():
     st.header("📊 Portfolio Intelligence Dashboard")
     st.caption("Advanced portfolio management with capital allocation and Minervini exit signals")
 
-    # Initialize session state for capital management
-    if 'deployed_capital' not in st.session_state:
-        st.session_state.deployed_capital = 650000.0
-    if 'target_capital' not in st.session_state:
-        st.session_state.target_capital = 650000.0
+   # Initialize session state for capital management
+if 'deployed_capital' not in st.session_state:
+    st.session_state.deployed_capital = 650000.0
+if 'target_capital' not in st.session_state:
+    st.session_state.target_capital = 650000.0
 
-    api_session_key = st.secrets.get("integrate_api_session_key", "")
-    auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
+api_session_key = st.secrets.get("integrate_api_session_key", "")
+auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
 
-    # Capital Management Section
-    st.sidebar.header("💰 Capital Management")
-    st.session_state.deployed_capital = st.sidebar.number_input(
-        "Total Deployed Capital (₹)", 
-        min_value=0.0, 
-        value=st.session_state.deployed_capital, 
-        step=10000.0,
-        key='deployed_capital'
-    )
-    
-    st.session_state.target_capital = st.sidebar.number_input(
-        "Target Deployment (₹)", 
-        min_value=0.0, 
-        value=st.session_state.target_capital, 
-        step=10000.0,
-        key='target_capital'
-    )
+# Capital Management Section
+st.sidebar.header("💰 Capital Management")
+
+# Use the session state values as defaults, but don't reassign after widget creation
+deployed_capital_input = st.sidebar.number_input(
+    "Total Deployed Capital (₹)", 
+    min_value=0.0, 
+    value=st.session_state.deployed_capital, 
+    step=10000.0,
+    key='deployed_capital'
+)
+
+target_capital_input = st.sidebar.number_input(
+    "Target Deployment (₹)", 
+    min_value=0.0, 
+    value=st.session_state.target_capital, 
+    step=10000.0,
+    key='target_capital'
+)
+
+# If you need to use updated values in logic, use the local variables:
+# deployed_capital_input and target_capital_input
+
     
     # Load master for chart lookup
     master_df = load_master()
