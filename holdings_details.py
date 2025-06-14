@@ -204,6 +204,21 @@ def open_risk_status(open_risk):
     else:
         return "At Risk"
 
+def minervini_high_vs_ema20_interpretation(high, ema20):
+    if ema20 == 0 or pd.isnull(high) or pd.isnull(ema20):
+        return "", ""
+    diff_pct = ((high - ema20) / ema20) * 100
+    diff_pct_rounded = round(diff_pct, 2)
+    if diff_pct >= 50:
+        interp = "🚨 Immediate Sell: High is 50%+ above 20 EMA"
+    elif diff_pct >= 40:
+        interp = "⚠️ Ready to Sell: High is 40%+ above 20 EMA"
+    elif diff_pct >= 20:
+        interp = "⚠️ Caution: High is 20%+ above 20 EMA"
+    else:
+        interp = "✅ Healthy: High is within reasonable range of 20 EMA"
+    return diff_pct_rounded, interp
+
 def show():
     st.title("Holdings Details Dashboard")
 
@@ -402,8 +417,8 @@ def show():
                 chart_df = fetch_candles_definedge(segment, token, from_dt, to_dt, api_key=api_session_key)
                 chart_df = chart_df.sort_values("Date")
                 chart_df = chart_df[chart_df["Date"] <= pd.Timestamp.now()]
+                chart_df['EMA20'] = chart_df['Close'].ewm(span=20, adjust=False).mean()
                 if show_ema:
-                    chart_df['EMA20'] = chart_df['Close'].ewm(span=20, adjust=False).mean()
                     chart_df['EMA50'] = chart_df['Close'].ewm(span=50, adjust=False).mean()
                 if show_rsi:
                     chart_df['RSI'] = compute_rsi(chart_df)
@@ -505,7 +520,7 @@ def show():
                         row=macd_row, col=1
                     )
                 fig.update_layout(
-                    height=900,
+                    height=600,
                     title=f"{selected_symbol} Technical Analysis",
                     showlegend=True,
                     xaxis=dict(type="category"),
@@ -527,7 +542,16 @@ def show():
                     col4.metric("Largest Spread", f"₹{signals['largest_spread']:.2f}")
                     col5.metric("Exhaustion Gap", "Yes" if signals['exhaustion_gap'] else "No")
                     col6.metric("Volume Reversal", "Yes" if signals['high_volume_reversal'] else "No")
-                    # Only bullet points / signals
+                    
+                    # NEW: High vs EMA20 metric
+                    latest = chart_df.iloc[-1]
+                    ema20 = latest['EMA20']
+                    high = latest['High']
+                    diff_pct, high_interp = minervini_high_vs_ema20_interpretation(high, ema20)
+                    col7, col8 = st.columns(2)
+                    col7.metric("Current High vs 20 EMA", f"{diff_pct:+.2f}%")
+                    col8.markdown(f"**{high_interp}**")
+
                     if signals['warnings']:
                         st.error(f"🚨 Sell Signals Detected for {selected_symbol} stock")
                         for warning in signals['warnings']:
