@@ -16,7 +16,7 @@ def show():
     # --- Prepare DataFrame with all details ---
     rows = []
     for h in holdings:
-        # --- Robust symbol extraction ---
+        # Extract symbol robustly
         ts = h.get("tradingsymbol")
         if isinstance(ts, list):
             if ts:
@@ -35,13 +35,46 @@ def show():
         isin = h.get("isin", "")
         product = h.get("product", "")
         qty = float(h.get("dp_qty", 0) or 0)
-        avg_buy = float(h.get("avg_buy_price", 0) or 0)
-        invested = avg_buy * qty
+        entry = float(h.get("avg_buy_price", 0) or 0)
+        invested = entry * qty
 
-        # Try to get last traded price (LTP), fallback to current_price or 0
-        ltp = float(h.get("ltp", h.get("current_price", 0)) or 0)
-        current_value = ltp * qty
-        pnl = current_value - invested
+        ltp = h.get("ltp", None)
+        try:
+            ltp = float(ltp) if ltp is not None else None
+        except:
+            ltp = None
+
+        # Calculate P&L only if LTP is available and >0
+        if ltp and ltp > 0:
+            current_value = ltp * qty
+            pnl = current_value - invested
+        else:
+            current_value = ""
+            pnl = ""
+
+        # --- TRAILING STOP LOSS LOGIC ---
+        # Initial SL
+        initial_sl = round(entry * 0.97, 2)
+        status = "Initial SL"
+        trailing_sl = initial_sl
+
+        if ltp and ltp > 0:
+            change_pct = 100 * (ltp - entry) / entry if entry else 0
+            # Trailing SL steps
+            if change_pct >= 30:
+                trailing_sl = round(entry * 1.20, 2)
+                status = "Excellent Profit (SL at Entry +20%)"
+            elif change_pct >= 20:
+                trailing_sl = round(entry * 1.10, 2)
+                status = "Good Profit (SL at Entry +10%)"
+            elif change_pct >= 10:
+                trailing_sl = round(entry, 2)
+                status = "Safe (Breakeven SL)"
+        else:
+            change_pct = ""
+
+        # Open Risk
+        open_risk = (trailing_sl - entry) * qty
 
         rows.append({
             "Symbol": tsym,
@@ -49,11 +82,15 @@ def show():
             "ISIN": isin,
             "Product": product,
             "Qty": qty,
-            "Avg Buy": avg_buy,
+            "Entry": entry,
             "Invested": invested,
-            "Current Price": ltp,
+            "Current Price": ltp if ltp and ltp > 0 else "",
             "Current Value": current_value,
             "P&L": pnl,
+            "Change %": round(change_pct, 2) if change_pct != "" else "",
+            "Status": status,
+            "Stop Loss": trailing_sl,
+            "Open Risk": open_risk,
             "DP Free Qty": h.get("dp_free_qty", ""),
             "Pledge Qty": h.get("pledge_qty", ""),
             "Collateral Qty": h.get("collateral_qty", ""),
@@ -65,7 +102,7 @@ def show():
         st.warning("No active holdings with quantity > 0.")
         return
 
-    # --- Capital Management (Top section, fixed capital) ---
+    # --- Capital Management ---
     TOTAL_CAPITAL = 650000.0
     total_invested = df["Invested"].sum()
     cash_in_hand = max(TOTAL_CAPITAL - total_invested, 0)
@@ -96,21 +133,28 @@ def show():
     st.plotly_chart(fig, use_container_width=True)
 
     # --- Main Holdings Table with all columns and P&L color ---
-    st.subheader("Holdings Details Table")
+    st.subheader("Holdings Details Table (with Trailing SL & Open Risk)")
     st.dataframe(
         df.style.applymap(
             lambda x: "background-color:#c6f5c6" if isinstance(x, (int, float)) and x > 0 else ("background-color:#ffcccc" if isinstance(x, (int, float)) and x < 0 else ""),
-            subset=["P&L"]
+            subset=["P&L", "Open Risk"]
         ),
         use_container_width=True,
     )
 
     # --- Totals Summary ---
     st.subheader("Summary")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Total Invested", f"₹{df['Invested'].sum():,.0f}")
-    col2.metric("Total Current Value", f"₹{df['Current Value'].sum():,.0f}")
-    col3.metric("Total P&L", f"₹{df['P&L'].sum():,.0f}")
+    col2.metric("Total Current Value", f"₹{df['Current Value'].replace('', 0).sum():,.0f}")
+    col3.metric("Total P&L", f"₹{df['P&L'].replace('', 0).sum():,.0f}")
     col4.metric("Total Qty", f"{df['Qty'].sum():,.0f}")
+    col5.metric("Total Open Risk", f"₹{df['Open Risk'].sum():,.0f}")
 
-    st.info("The allocation pie now includes Cash in Hand for a true portfolio breakdown.")
+    st.info(
+        "Trailing Stop Loss logic: "
+        "Initial SL = Entry - 3%. "
+        "If gain >10%, SL moves to Entry (Safe). "
+        "If gain >20%, SL = Entry +10% (Good Profit). "
+        "If gain >30%, SL = Entry +20% (Excellent Profit)."
+    )
