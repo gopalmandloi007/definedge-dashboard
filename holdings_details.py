@@ -1,10 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 from utils import integrate_get
-import requests
-import io
+import plotly.express as px
+
+st.title("🔒 Bulk Stop Loss & Allocation Manager")
+
+api_session_key = st.secrets.get("integrate_api_session_key", "")
 
 def safe_float(val):
     try:
@@ -12,130 +14,129 @@ def safe_float(val):
     except Exception:
         return 0.0
 
-@st.cache_data
-def load_master():
-    df = pd.read_csv("master.csv", sep="\t", header=None)
-    df.columns = [
-        "segment", "token", "symbol", "instrument", "series", "isin1",
-        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
-    ]
-    return df[["segment", "token", "symbol", "instrument"]]
+# Fetch holdings data
+data = integrate_get("/holdings")
+holdings = data.get("data", [])
+if not holdings:
+    st.warning("No holdings found.")
+    st.stop()
 
-def get_token(symbol, segment, master_df):
-    symbol = symbol.strip().upper()
-    segment = segment.strip().upper()
-    row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
-    if not row.empty:
-        return row.iloc[0]['token']
-    row2 = master_df[(master_df['instrument'] == symbol) & (master_df['segment'] == segment)]
-    if not row2.empty:
-        return row2.iloc[0]['token']
-    return None
+# Prepare data
+rows = []
+for h in holdings:
+    ts = h.get("tradingsymbol")
+    exch = h.get("exchange", "NSE")
+    if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
+        tsym = ts[0].get("tradingsymbol", "N/A")
+        qty = safe_float(ts[0].get("dp_qty", h.get("dp_qty", 0)))
+        avg_buy = safe_float(ts[0].get("avg_buy_price", h.get("avg_buy_price", 0)))
+    else:
+        tsym = ts if isinstance(ts, str) else "N/A"
+        qty = safe_float(h.get("dp_qty", 0))
+        avg_buy = safe_float(h.get("avg_buy_price", 0))
+    if qty > 0:
+        invested = avg_buy * qty
+        rows.append({
+            "Symbol": tsym,
+            "Exchange": exch,
+            "Qty": qty,
+            "Avg Buy": avg_buy,
+            "Invested": invested,
+        })
 
-def get_ltp(exchange, token, api_session_key):
-    if not exchange or not token:
-        return 0.0
-    url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{token}"
-    headers = {"Authorization": api_session_key}
-    try:
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            return safe_float(resp.json().get("ltp", 0))
-        else:
-            return None
-    except Exception:
-        return None
+df = pd.DataFrame(rows)
 
-def show():
-    st.header("Holdings Details & Stop Loss Management")
-    api_session_key = st.secrets.get("integrate_api_session_key", "")
-    master_df = load_master()
+if df.empty:
+    st.warning("No active holdings with quantity > 0.")
+    st.stop()
 
-    # --- Total capital setup ---
-    if 'total_capital' not in st.session_state:
-        st.session_state.total_capital = 657000.0  # You can set your default here
+# --- Capital Management ---
+st.sidebar.header("💰 Capital Management")
+if "total_capital" not in st.session_state:
+    st.session_state.total_capital = df["Invested"].sum() + 200000  # default add cash buffer
 
-    st.sidebar.subheader("💰 Capital Management")
-    total_capital = st.sidebar.number_input(
-        "Total Capital (Cash + Invested)",
-        min_value=0.0,
-        value=st.session_state.total_capital,
-        step=10000.0,
-        key="total_capital_input"
-    )
-    st.session_state.total_capital = total_capital
+total_capital = st.sidebar.number_input(
+    "Total Capital (Invested + Cash)",
+    min_value=0.0,
+    value=st.session_state.total_capital,
+    step=10000.0,
+    key="total_capital_input"
+)
+st.session_state.total_capital = total_capital
 
-    data = integrate_get("/holdings")
-    holdings = data.get("data", [])
-    holding_symbols = []
-    symbol_exchange = {}
-    avg_buys = {}
-    qtys = {}
-    tokens = {}
+cash_in_hand = st.session_state.total_capital - df["Invested"].sum()
+allocation_percent = (df["Invested"].sum() / st.session_state.total_capital * 100) if st.session_state.total_capital else 0
 
-    for h in holdings:
-        ts = h.get("tradingsymbol")
-        exch = h.get("exchange", "NSE")
-        if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
-            tsym = ts[0].get("tradingsymbol", "N/A")
-            exch = ts[0].get("exchange", exch)
-            qty = safe_float(ts[0].get("dp_qty", h.get("dp_qty", 0)))
-            avg_buy = safe_float(ts[0].get("avg_buy_price", h.get("avg_buy_price", 0)))
-            token = ts[0].get("token")
-        else:
-            tsym = ts if isinstance(ts, str) else "N/A"
-            qty = safe_float(h.get("dp_qty", 0))
-            avg_buy = safe_float(h.get("avg_buy_price", 0))
-            token = h.get("token")
-        holding_symbols.append(tsym)
-        symbol_exchange[tsym] = exch
-        avg_buys[tsym] = avg_buy
-        qtys[tsym] = qty
-        tokens[tsym] = token
+colA, colB, colC = st.columns(3)
+colA.metric("Total Capital", f"₹{st.session_state.total_capital:,.0f}")
+colB.metric("Invested", f"₹{df['Invested'].sum():,.0f}", f"{allocation_percent:.1f}%")
+colC.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}")
 
-    selected_symbol = st.selectbox("Select Holding", sorted(holding_symbols))
-    segment = symbol_exchange[selected_symbol]
-    avg_buy = avg_buys[selected_symbol]
-    qty = qtys[selected_symbol]
-    token = tokens[selected_symbol]
+# --- Stop Loss Table ---
+st.subheader("🛑 Bulk Stop Loss Table (Editable)")
+if "sl_dict" not in st.session_state:
+    st.session_state.sl_dict = {}
 
-    # --- Stop loss state management per stock ---
-    if 'stop_losses' not in st.session_state:
-        st.session_state.stop_losses = {}
-    default_stop_loss = round(avg_buy * 0.98, 2)
-    stop_loss = st.session_state.stop_losses.get(selected_symbol, default_stop_loss)
+# Prepare editable SL column with default (entry -2%)
+df["Default SL"] = (df["Avg Buy"] * 0.98).round(2)
+df["Stop Loss"] = df.apply(lambda x: st.session_state.sl_dict.get(x["Symbol"], x["Default SL"]), axis=1)
 
-    st.subheader(f"Stop Loss for {selected_symbol}")
-    stop_loss_input = st.number_input(
-        "Stop Loss Price", min_value=0.0, value=stop_loss, step=0.1, key=f"stop_loss_{selected_symbol}"
-    )
+# Editable SLs
+edited_df = st.data_editor(
+    df[["Symbol", "Avg Buy", "Qty", "Invested", "Stop Loss"]],
+    column_config={
+        "Stop Loss": st.column_config.NumberColumn("Stop Loss", format="%.2f"),
+    },
+    use_container_width=True,
+    key="holdings_sl_editor"
+)
 
-    if st.button("Update Stop Loss"):
-        st.session_state.stop_losses[selected_symbol] = stop_loss_input
-        st.success(f"Stop loss updated for {selected_symbol}")
+# Save SLs to session state
+if st.button("💾 Save Stop Losses"):
+    for i, row in edited_df.iterrows():
+        st.session_state.sl_dict[row["Symbol"]] = row["Stop Loss"]
+    st.success("All stop losses updated!")
 
-    # --- Calculate open risk ---
-    ltp = get_ltp(segment, token, api_session_key)
-    open_risk = (ltp - stop_loss_input) * qty if ltp and qty else 0.0
+# Reset all SLs to default
+if st.button("↩️ Reset All to Default SL (-2% Entry)"):
+    for symbol in df["Symbol"]:
+        st.session_state.sl_dict[symbol] = df[df["Symbol"] == symbol]["Default SL"].values[0]
+    st.experimental_rerun()
 
-    st.write(f"**Entry Price:** ₹{avg_buy:,.2f}")
-    st.write(f"**Current LTP:** ₹{ltp:,.2f}" if ltp else "**Current LTP:** N/A")
-    st.write(f"**Quantity:** {qty}")
-    st.write(f"**Selected Stop Loss:** ₹{stop_loss_input:,.2f}")
-    st.write(f"### 🛑 Open Risk: ₹{open_risk:,.2f}")
+# --- Open Risk Calculation ---
+edited_df["Open Risk"] = (edited_df["Stop Loss"] - edited_df["Avg Buy"]) * edited_df["Qty"]
+total_risk = edited_df["Open Risk"].sum()
 
-    # --- Capital Allocation Summary ---
-    invested = avg_buy * qty
-    cash_balance = st.session_state.total_capital - invested
-    allocation_percent = invested / st.session_state.total_capital * 100 if st.session_state.total_capital else 0
+st.subheader("Risk Analysis")
+col1, col2 = st.columns(2)
+col1.metric("Total Open Risk", f"₹{total_risk:,.0f}")
+col2.metric("Risk % of Total Capital", f"{(total_risk/st.session_state.total_capital*100):.2f}%" if st.session_state.total_capital else "0%")
 
-    st.subheader("Capital Allocation Metrics")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Capital", f"₹{st.session_state.total_capital:,.0f}")
-    col2.metric("Invested (this stock)", f"₹{invested:,.0f}")
-    col3.metric("Allocation %", f"{allocation_percent:.2f}%")
+# --- Pie Chart: Allocation ---
+st.subheader("Portfolio Allocation Pie")
+fig = px.pie(edited_df, names="Symbol", values="Invested", title="Allocation by Stock", hole=0.3)
+st.plotly_chart(fig, use_container_width=True)
 
-    st.info(f"Editable capital reflects your cash + invested. Adjust as your demat balance changes.")
+# --- Pie Chart: Risk Distribution ---
+st.subheader("Risk Distribution Pie")
+fig2 = px.pie(edited_df, names="Symbol", values="Open Risk", title="Open Risk by Stock", hole=0.3)
+st.plotly_chart(fig2, use_container_width=True)
 
-if __name__ == "__main__":
-    show()
+# --- Download CSV Option ---
+csv = edited_df.to_csv(index=False)
+st.download_button("Download as CSV", csv, "holdings_sl_table.csv", "text/csv")
+
+# --- Table with color highlights ---
+st.subheader("Summary Table (Profit/Risk Highlighted)")
+def highlight_risk(val):
+    if val < 0:
+        return "background-color: #ffcccc"  # Red risk
+    elif val > 0:
+        return "background-color: #c6f5c6"  # Green profit
+    return ""
+st.dataframe(
+    edited_df.style.applymap(highlight_risk, subset=["Open Risk"]),
+    use_container_width=True,
+)
+
+st.info("You can edit all stop losses above and click Save. Reset sets all to -2% of entry. Download for record keeping.")
