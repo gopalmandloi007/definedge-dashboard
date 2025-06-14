@@ -1,10 +1,100 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import requests
+from datetime import datetime, timedelta
 from utils import integrate_get
+import plotly.express as px
+
+# ========== Master Loader & Token Lookup ==========
+
+@st.cache_data
+def load_master():
+    df = pd.read_csv("master.csv", sep="\t", header=None)
+    df.columns = [
+        "segment", "token", "symbol", "instrument", "series", "isin1",
+        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
+    ]
+    return df[["segment", "token", "symbol", "instrument"]]
+
+def get_token(symbol, segment, master_df):
+    symbol = str(symbol).strip().upper()
+    segment = str(segment).strip().upper()
+    row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
+    if not row.empty:
+        return row.iloc[0]['token']
+    row2 = master_df[(master_df['instrument'] == symbol) & (master_df['segment'] == segment)]
+    if not row2.empty:
+        return row2.iloc[0]['token']
+    return None
+
+def safe_float(val):
+    try:
+        return float(val)
+    except Exception:
+        return 0.0
+
+# ========== LTP Fetcher ==========
+
+def get_ltp(exchange, token, api_session_key):
+    if not exchange or not token:
+        return None
+    url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{token}"
+    headers = {"Authorization": api_session_key}
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            ltp = resp.json().get("ltp", None)
+            return safe_float(ltp)
+        else:
+            return None
+    except Exception:
+        return None
+
+def get_prev_close(exchange, token, api_session_key):
+    today = datetime.now()
+    for i in range(1, 5):
+        prev_day = today - timedelta(days=i)
+        if prev_day.weekday() < 5:
+            break
+    else:
+        prev_day = today - timedelta(days=1)
+    from_str = prev_day.strftime("%d%m%Y0000")
+    to_str = today.strftime("%d%m%Y1530")
+    url = f"https://data.definedgesecurities.com/sds/history/{exchange}/{token}/day/{from_str}/{to_str}"
+    headers = {"Authorization": api_session_key}
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            rows = resp.text.strip().split("\n")
+            if len(rows) >= 2:
+                prev_row = rows[-2]
+                prev_close = safe_float(prev_row.split(",")[4])
+                return prev_close
+            elif len(rows) == 1:
+                prev_close = safe_float(rows[0].split(",")[4])
+                return prev_close
+    except Exception:
+        pass
+    return None
+
+def highlight_pnl(val):
+    try:
+        val = float(val)
+        if val > 0:
+            return 'color: green'
+        elif val < 0:
+            return 'color: red'
+    except:
+        pass
+    return 'color: black'
+
+# ========== MAIN DASHBOARD ==========
 
 def show():
     st.title("Holdings Details Dashboard")
+
+    api_session_key = st.secrets.get("integrate_api_session_key", "")
+    master_df = load_master()
 
     # --- Fetch holdings data ---
     data = integrate_get("/holdings")
@@ -13,54 +103,51 @@ def show():
         st.warning("No holdings found.")
         return
 
-    # --- Prepare DataFrame with all details ---
-    rows = []
+    # Filter only ACTIVE holdings (qty > 0)
+    active_holdings = []
     for h in holdings:
-        # Extract symbol robustly
-        ts = h.get("tradingsymbol")
-        if isinstance(ts, list):
-            if ts:
-                if isinstance(ts[0], dict):
-                    tsym = ts[0].get("tradingsymbol", "N/A")
-                else:
-                    tsym = str(ts[0])
-            else:
-                tsym = "N/A"
-        elif isinstance(ts, dict):
-            tsym = ts.get("tradingsymbol", "N/A")
-        else:
-            tsym = str(ts) if ts is not None else "N/A"
+        qty = safe_float(h.get("dp_qty", 0))
+        if qty > 0:
+            active_holdings.append(h)
 
+    rows = []
+    total_invested = 0.0
+    total_current = 0.0
+    total_open_risk = 0.0
+
+    for h in active_holdings:
+        # Symbol, Exchange, ISIN etc.
+        ts = h.get("tradingsymbol")
         exch = h.get("exchange", "NSE")
+        segment = exch # If you have segment separately, use that
         isin = h.get("isin", "")
         product = h.get("product", "")
-        qty = float(h.get("dp_qty", 0) or 0)
-        entry = float(h.get("avg_buy_price", 0) or 0)
+        qty = safe_float(h.get("dp_qty", 0))
+        entry = safe_float(h.get("avg_buy_price", 0))
         invested = entry * qty
 
-        ltp = h.get("ltp", None)
-        try:
-            ltp = float(ltp) if ltp is not None else None
-        except:
-            ltp = None
+        # --- Token from master ---
+        token = get_token(ts, segment, master_df)
+        ltp = get_ltp(exch, token, api_session_key) if token else None
+        if not ltp or ltp == 0:
+            ltp = get_prev_close(exch, token, api_session_key) if token else None
 
-        # Calculate P&L only if LTP is available and >0
+        # --- Current Value & P&L ---
         if ltp and ltp > 0:
             current_value = ltp * qty
             pnl = current_value - invested
+            change_pct = ((ltp - entry) / entry * 100) if entry else 0
         else:
-            current_value = ""
-            pnl = ""
+            current_value = None
+            pnl = None
+            change_pct = None
 
-        # --- TRAILING STOP LOSS LOGIC ---
-        # Initial SL
+        # --- Trailing Stop Loss Logic ---
         initial_sl = round(entry * 0.97, 2)
         status = "Initial SL"
         trailing_sl = initial_sl
 
         if ltp and ltp > 0:
-            change_pct = 100 * (ltp - entry) / entry if entry else 0
-            # Trailing SL steps
             if change_pct >= 30:
                 trailing_sl = round(entry * 1.20, 2)
                 status = "Excellent Profit (SL at Entry +20%)"
@@ -70,24 +157,26 @@ def show():
             elif change_pct >= 10:
                 trailing_sl = round(entry, 2)
                 status = "Safe (Breakeven SL)"
-        else:
-            change_pct = ""
 
-        # Open Risk
         open_risk = (trailing_sl - entry) * qty
 
+        # --- Accumulate Totals ---
+        total_invested += invested
+        total_current += current_value if current_value else 0
+        total_open_risk += open_risk
+
         rows.append({
-            "Symbol": tsym,
+            "Symbol": ts,
             "Exchange": exch,
             "ISIN": isin,
             "Product": product,
             "Qty": qty,
             "Entry": entry,
             "Invested": invested,
-            "Current Price": ltp if ltp and ltp > 0 else "",
-            "Current Value": current_value,
-            "P&L": pnl,
-            "Change %": round(change_pct, 2) if change_pct != "" else "",
+            "Current Price": ltp if ltp else "N/A",
+            "Current Value": current_value if current_value else "N/A",
+            "P&L": pnl if pnl is not None else "N/A",
+            "Change %": round(change_pct, 2) if change_pct is not None else "N/A",
             "Status": status,
             "Stop Loss": trailing_sl,
             "Open Risk": open_risk,
@@ -104,7 +193,6 @@ def show():
 
     # --- Capital Management ---
     TOTAL_CAPITAL = 650000.0
-    total_invested = df["Invested"].sum()
     cash_in_hand = max(TOTAL_CAPITAL - total_invested, 0)
     allocation_percent = (total_invested / TOTAL_CAPITAL * 100) if TOTAL_CAPITAL else 0
 
@@ -136,7 +224,7 @@ def show():
     st.subheader("Holdings Details Table (with Trailing SL & Open Risk)")
     st.dataframe(
         df.style.applymap(
-            lambda x: "background-color:#c6f5c6" if isinstance(x, (int, float)) and x > 0 else ("background-color:#ffcccc" if isinstance(x, (int, float)) and x < 0 else ""),
+            highlight_pnl,
             subset=["P&L", "Open Risk"]
         ),
         use_container_width=True,
@@ -145,11 +233,11 @@ def show():
     # --- Totals Summary ---
     st.subheader("Summary")
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Total Invested", f"₹{df['Invested'].sum():,.0f}")
-    col2.metric("Total Current Value", f"₹{df['Current Value'].replace('', 0).sum():,.0f}")
-    col3.metric("Total P&L", f"₹{df['P&L'].replace('', 0).sum():,.0f}")
+    col1.metric("Total Invested", f"₹{total_invested:,.0f}")
+    col2.metric("Total Current Value", f"₹{total_current:,.0f}")
+    col3.metric("Total P&L", f"₹{(total_current-total_invested):,.0f}")
     col4.metric("Total Qty", f"{df['Qty'].sum():,.0f}")
-    col5.metric("Total Open Risk", f"₹{df['Open Risk'].sum():,.0f}")
+    col5.metric("Total Open Risk", f"₹{total_open_risk:,.0f}")
 
     st.info(
         "Trailing Stop Loss logic: "
