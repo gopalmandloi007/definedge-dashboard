@@ -61,11 +61,10 @@ def compute_rsi(data, window=14):
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
     
+    # Handle case where avg_loss is 0 to avoid division by zero
     avg_gain = gain.rolling(window=window).mean()
     avg_loss = loss.rolling(window=window).mean()
-    
-    # Handle case where avg_loss is 0 to avoid division by zero
-    avg_loss = avg_loss.replace(0, 1e-10)
+    avg_loss = avg_loss.replace(0, 1e-10)  # Avoid division by zero
     
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
@@ -270,12 +269,36 @@ def minervini_sell_signals(df, lookback_days=15):
     return signals
 
 def show():
-    st.header("📊 Holdings Intelligence Dashboard")
-    st.caption("Actionable insights for portfolio decisions - Hold, Add, Reduce, or Exit")
+    st.header("📊 Portfolio Intelligence Dashboard")
+    st.caption("Advanced portfolio management with capital allocation and Minervini exit signals")
+
+    # Initialize session state for capital management
+    if 'deployed_capital' not in st.session_state:
+        st.session_state.deployed_capital = 650000.0
+    if 'target_capital' not in st.session_state:
+        st.session_state.target_capital = 650000.0
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
     auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
 
+    # Capital Management Section
+    st.sidebar.header("💰 Capital Management")
+    st.session_state.deployed_capital = st.sidebar.number_input(
+        "Total Deployed Capital (₹)", 
+        min_value=0.0, 
+        value=st.session_state.deployed_capital, 
+        step=10000.0,
+        key='deployed_capital'
+    )
+    
+    st.session_state.target_capital = st.sidebar.number_input(
+        "Target Deployment (₹)", 
+        min_value=0.0, 
+        value=st.session_state.target_capital, 
+        step=10000.0,
+        key='target_capital'
+    )
+    
     # Load master for chart lookup
     master_df = load_master()
 
@@ -373,6 +396,22 @@ def show():
         portfolio_value = df['Current'].sum()
         df['Portfolio %'] = (df['Current'] / portfolio_value * 100).round(2)
 
+        # Calculate cash position and allocation metrics
+        cash_in_hand = st.session_state.deployed_capital - total_invested
+        allocation_percent = (portfolio_value / st.session_state.deployed_capital * 100)
+        additional_needed = max(0, st.session_state.target_capital - st.session_state.deployed_capital)
+        
+        # Capital Allocation Summary
+        st.subheader("💰 Capital Allocation")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Deployed Capital", f"₹{st.session_state.deployed_capital:,.0f}")
+        col2.metric("Target Capital", f"₹{st.session_state.target_capital:,.0f}", 
+                   f"₹{additional_needed:,.0f} needed" if additional_needed > 0 else "Target reached")
+        col3.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}", 
+                   f"{cash_in_hand/st.session_state.deployed_capital*100:.1f}%" if st.session_state.deployed_capital else "0%")
+        col4.metric("Allocation %", f"{allocation_percent:.1f}%", 
+                   f"₹{portfolio_value:,.0f} invested")
+        
         # ADD ACTION COLUMN BASED ON METRICS
         df['Action'] = "HOLD"
         df.loc[df['%Chg Avg'] > 25, 'Action'] = "CONSIDER PARTIAL PROFIT"
@@ -389,8 +428,9 @@ def show():
             df = df[df['Symbol'].str.contains(search.strip(), case=False, na=False)]
 
         # Portfolio Summary Cards
+        st.subheader("📊 Portfolio Summary")
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Value", f"₹{portfolio_value:,.0f}")
+        col1.metric("Portfolio Value", f"₹{portfolio_value:,.0f}")
         col2.metric("Total P&L", f"₹{total_overall_pnl:,.0f}", 
                    f"{total_overall_pnl/total_invested*100:.1f}%" if total_invested else "0%")
         col3.metric("Today's P&L", f"₹{total_today_pnl:,.0f}")
@@ -416,7 +456,7 @@ def show():
             st.plotly_chart(fig, use_container_width=True)
 
         # Enhanced Holdings Table with Actionable Columns
-        st.subheader("Holdings Analysis")
+        st.subheader("📝 Holdings Analysis")
         
         # Color formatting for action column
         def color_action(val):
