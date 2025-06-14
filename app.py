@@ -1,7 +1,8 @@
 import streamlit as st
-st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 import importlib
-import os  # <-- Add this line
+
+# Set page config ONCE at the top
+st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 
 PAGES = {
     "Holdings": "holdings",
@@ -26,12 +27,13 @@ st.title("Definedge Integrate Dashboard")
 
 page = st.sidebar.radio("Go to", list(PAGES.keys()))
 modulename = PAGES[page]
+
 try:
     module = importlib.import_module(modulename)
-    if hasattr(module, "show"):
+    if hasattr(module, "show") and callable(getattr(module, "show")):
         module.show()
     else:
-        st.error(f"Module `{modulename}` missing `show()` function.")
+        st.error(f"Module `{modulename}` is missing a callable `show()` function.")
 except ModuleNotFoundError:
     st.error(f"Module `{modulename}.py` not found.")
 except Exception as e:
