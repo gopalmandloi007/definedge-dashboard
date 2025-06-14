@@ -1,147 +1,58 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from utils import integrate_get
-import plotly.express as px
 
-st.title("🔒 Bulk Stop Loss & Allocation Manager")
+def show():
+    st.title("Holdings Details")
 
-api_session_key = st.secrets.get("integrate_api_session_key", "")
+    # Fetch holdings data
+    data = integrate_get("/holdings")
+    holdings = data.get("data", [])
+    if not holdings:
+        st.warning("No holdings found.")
+        return
 
-def safe_float(val):
-    try:
-        return float(val)
-    except Exception:
-        return 0.0
-
-# Fetch holdings data
-data = integrate_get("/holdings")
-holdings = data.get("data", [])
-if not holdings:
-    st.warning("No holdings found.")
-    st.stop()
-
-# Prepare data
-rows = []
-for h in holdings:
-    ts = h.get("tradingsymbol")
-    exch = h.get("exchange", "NSE")
-    if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
-        tsym = ts[0].get("tradingsymbol", "N/A")
-        qty = safe_float(ts[0].get("dp_qty", h.get("dp_qty", 0)))
-        avg_buy = safe_float(ts[0].get("avg_buy_price", h.get("avg_buy_price", 0)))
-    else:
-        tsym = ts if isinstance(ts, str) else "N/A"
-        qty = safe_float(h.get("dp_qty", 0))
-        avg_buy = safe_float(h.get("avg_buy_price", 0))
-    if qty > 0:
+    # Prepare rows for DataFrame
+    rows = []
+    for h in holdings:
+        ts = h.get("tradingsymbol")
+        exch = h.get("exchange", "NSE")
+        qty = float(h.get("dp_qty", 0) or 0)
+        avg_buy = float(h.get("avg_buy_price", 0) or 0)
+        ltp = float(h.get("ltp", h.get("current_price", 0)) or 0)
         invested = avg_buy * qty
+        current_value = ltp * qty
+        pnl = current_value - invested
+
         rows.append({
-            "Symbol": tsym,
+            "Symbol": ts,
             "Exchange": exch,
             "Qty": qty,
             "Avg Buy": avg_buy,
+            "Current Price": ltp,
             "Invested": invested,
+            "Current Value": current_value,
+            "P&L": pnl
         })
 
-df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        st.warning("No active holdings with quantity > 0.")
+        return
 
-if df.empty:
-    st.warning("No active holdings with quantity > 0.")
-    st.stop()
+    # Show dataframe
+    st.dataframe(
+        df.style.applymap(
+            lambda x: "background-color:#c6f5c6" if isinstance(x, (int, float)) and x > 0 else ("background-color:#ffcccc" if isinstance(x, (int, float)) and x < 0 else ""),
+            subset=["P&L"]
+        ),
+        use_container_width=True,
+    )
 
-# --- Capital Management (Top, not editable, always 650000) ---
-TOTAL_CAPITAL = 650000.0
+    # Total summary
+    st.subheader("Summary")
+    col1, col2 = st.columns(2)
+    col1.metric("Total Invested", f"₹{df['Invested'].sum():,.0f}")
+    col2.metric("Total P&L", f"₹{df['P&L'].sum():,.0f}")
 
-total_invested = df["Invested"].sum()
-cash_in_hand = max(TOTAL_CAPITAL - total_invested, 0)
-allocation_percent = (total_invested / TOTAL_CAPITAL * 100) if TOTAL_CAPITAL else 0
-
-st.subheader("💰 Capital Management")
-colA, colB, colC = st.columns(3)
-colA.metric("Total Capital", f"₹{TOTAL_CAPITAL:,.0f}")
-colB.metric("Invested", f"₹{total_invested:,.0f}", f"{allocation_percent:.1f}%")
-colC.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}")
-
-# --- Pie Chart: Allocation (at the top) ---
-st.subheader("Portfolio Allocation Pie")
-fig = px.pie(
-    df, 
-    names="Symbol", 
-    values="Invested", 
-    title="Allocation by Stock", 
-    hole=0.3
-)
-fig.update_traces(textinfo='label+percent')
-st.plotly_chart(fig, use_container_width=True)
-
-# --- Stop Loss Table ---
-st.subheader("🛑 Bulk Stop Loss Table (Editable)")
-if "sl_dict" not in st.session_state:
-    st.session_state.sl_dict = {}
-
-# Prepare editable SL column with default (entry -2%)
-df["Default SL"] = (df["Avg Buy"] * 0.98).round(2)
-df["Stop Loss"] = df.apply(lambda x: st.session_state.sl_dict.get(x["Symbol"], x["Default SL"]), axis=1)
-
-# Editable SLs
-edited_df = st.data_editor(
-    df[["Symbol", "Avg Buy", "Qty", "Invested", "Stop Loss"]],
-    column_config={
-        "Stop Loss": st.column_config.NumberColumn("Stop Loss", format="%.2f"),
-    },
-    use_container_width=True,
-    key="holdings_sl_editor"
-)
-
-# Save SLs to session state
-if st.button("💾 Save Stop Losses"):
-    for i, row in edited_df.iterrows():
-        st.session_state.sl_dict[row["Symbol"]] = row["Stop Loss"]
-    st.success("All stop losses updated!")
-
-# Reset all SLs to default
-if st.button("↩️ Reset All to Default SL (-2% Entry)"):
-    for symbol in df["Symbol"]:
-        st.session_state.sl_dict[symbol] = df[df["Symbol"] == symbol]["Default SL"].values[0]
-    st.experimental_rerun()
-
-# --- Open Risk Calculation ---
-edited_df["Open Risk"] = (edited_df["Stop Loss"] - edited_df["Avg Buy"]) * edited_df["Qty"]
-total_risk = edited_df["Open Risk"].sum()
-
-st.subheader("Risk Analysis")
-col1, col2 = st.columns(2)
-col1.metric("Total Open Risk", f"₹{total_risk:,.0f}")
-col2.metric("Risk % of Total Capital", f"{(total_risk/TOTAL_CAPITAL*100):.2f}%" if TOTAL_CAPITAL else "0%")
-
-# --- Pie Chart: Risk Distribution ---
-st.subheader("Risk Distribution Pie")
-fig2 = px.pie(
-    edited_df, 
-    names="Symbol", 
-    values="Open Risk", 
-    title="Open Risk by Stock", 
-    hole=0.3
-)
-fig2.update_traces(textinfo='label+percent')
-st.plotly_chart(fig2, use_container_width=True)
-
-# --- Download CSV Option ---
-csv = edited_df.to_csv(index=False)
-st.download_button("Download as CSV", csv, "holdings_sl_table.csv", "text/csv")
-
-# --- Table with color highlights ---
-st.subheader("Summary Table (Profit/Risk Highlighted)")
-def highlight_risk(val):
-    if val < 0:
-        return "background-color: #ffcccc"  # Red risk
-    elif val > 0:
-        return "background-color: #c6f5c6"  # Green profit
-    return ""
-st.dataframe(
-    edited_df.style.applymap(highlight_risk, subset=["Open Risk"]),
-    use_container_width=True,
-)
-
-st.info("You can edit all stop losses above and click Save. Reset sets all to -2% of entry. Download for record keeping.")
+    st.info("This page shows your holdings with live P&L and current value. P&L is Current Value minus Invested.")
