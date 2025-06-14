@@ -2,14 +2,14 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-from utils import integrate_get
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import io
 import numpy as np
+import io
+from utils import integrate_get
 
-# ========== Enhanced Chart Utils ==========
+# ========== Chart & Data Utils ==========
 @st.cache_data
 def load_master():
     df = pd.read_csv("master.csv", sep="\t", header=None)
@@ -79,77 +79,18 @@ def safe_float(val):
     except Exception:
         return 0.0
 
-def get_ltp(exchange, token, api_session_key):
-    if not exchange or not token:
-        return 0.0
-    url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{token}"
-    headers = {"Authorization": api_session_key}
-    try:
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            return safe_float(resp.json().get("ltp", 0))
-        else:
-            return None
-    except Exception:
-        return None
-
-def get_prev_close(exchange, token, api_session_key):
-    today = datetime.now()
-    for i in range(1, 5):
-        prev_day = today - timedelta(days=i)
-        if prev_day.weekday() < 5:
-            break
-    else:
-        prev_day = today - timedelta(days=1)
-    from_str = prev_day.strftime("%d%m%Y0000")
-    to_str = today.strftime("%d%m%Y1530")
-    url = f"https://data.definedgesecurities.com/sds/history/{exchange}/{token}/day/{from_str}/{to_str}"
-    headers = {"Authorization": api_session_key}
-    try:
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            rows = resp.text.strip().split("\n")
-            if len(rows) >= 2:
-                prev_row = rows[-2]
-                prev_close = safe_float(prev_row.split(",")[4])
-                return prev_close
-            elif len(rows) == 1:
-                prev_close = safe_float(rows[0].split(",")[4])
-                return prev_close
-    except Exception:
-        pass
-    return 0.0
-
 def highlight_pnl(val):
     try:
         val = float(val)
         if val > 0:
-            return 'color: green'
+            return 'background-color:#c6f5c6'
         elif val < 0:
-            return 'color: red'
+            return 'background-color:#ffcccc'
     except:
         pass
-    return 'color: black'
+    return ''
 
-def generate_insights(row, portfolio_value):
-    insights = []
-    position_size = (row['Current'] / portfolio_value) * 100 if portfolio_value else 0
-    if position_size > 15:
-        insights.append("⚠️ Position too large (>15% of portfolio)")
-    elif position_size < 3:
-        insights.append("⚖️ Position too small (<3% of portfolio)")
-    if row['Overall P&L'] > 0:
-        if row['%Chg Avg'] > 25:
-            insights.append("💰 Consider taking partial profits (gains >25%)")
-    else:
-        if row['%Chg Avg'] < -15:
-            insights.append("❗ Significant unrealized loss (>15%)")
-    if row['%Chg'] > 5:
-        insights.append("📈 Strong positive momentum today")
-    elif row['%Chg'] < -5:
-        insights.append("📉 Strong negative momentum today")
-    return insights
-
+# ========== Minervini Sell Signals ==========
 def minervini_sell_signals(df, lookback_days=15):
     if len(df) < lookback_days:
         return {"error": "Insufficient data for analysis"}
@@ -218,361 +159,319 @@ def minervini_sell_signals(df, lookback_days=15):
         signals['warnings'].append("⚠️ Heavy volume down day - Consider exiting position")
     return signals
 
+# ========== MAIN DASHBOARD ==========
 def show():
-    st.header("📊 Holdings Intelligence Dashboard")
-    st.caption("Actionable insights for portfolio decisions - Hold, Add, Reduce, or Exit")
+    st.title("Holdings Details Dashboard")
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
-    auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
-
     master_df = load_master()
 
-    try:
-        data = integrate_get("/holdings")
-        holdings = data.get("data", [])
-        if not holdings:
-            st.info("No holdings found.")
-            return
+    # --- Fetch holdings data ---
+    data = integrate_get("/holdings")
+    holdings = data.get("data", [])
+    if not holdings:
+        st.warning("No holdings found.")
+        return
 
-        # Filter only ACTIVE holdings (qty > 0)
-        active_holdings = []
-        for h in holdings:
-            qty = 0.0
-            ts = h.get("tradingsymbol")
-            if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
-                qty = safe_float(ts[0].get("dp_qty", h.get("dp_qty", 0)))
+    # --- Prepare DataFrame with all details (from your code, full, not shortened) ---
+    rows = []
+    for h in holdings:
+        # Symbol extraction (robust)
+        ts = h.get("tradingsymbol")
+        if isinstance(ts, list):
+            if ts:
+                if isinstance(ts[0], dict):
+                    tsym = ts[0].get("tradingsymbol", "N/A")
+                else:
+                    tsym = str(ts[0])
             else:
-                qty = safe_float(h.get("dp_qty", 0))
-            if qty > 0:
-                active_holdings.append(h)
+                tsym = "N/A"
+        elif isinstance(ts, dict):
+            tsym = ts.get("tradingsymbol", "N/A")
+        else:
+            tsym = str(ts) if ts is not None else "N/A"
 
-        rows = []
-        total_today_pnl = 0.0
-        total_overall_pnl = 0.0
-        total_invested = 0.0
-        total_current = 0.0
+        exch = h.get("exchange", "NSE")
+        isin = h.get("isin", "")
+        product = h.get("product", "")
+        qty = float(h.get("dp_qty", 0) or 0)
+        entry = float(h.get("avg_buy_price", 0) or 0)
+        invested = entry * qty
 
-        symbol_segment_dict = {}
+        ltp = h.get("ltp", None)
+        try:
+            ltp = float(ltp) if ltp is not None else None
+        except:
+            ltp = None
 
-        for h in active_holdings:
-            ts = h.get("tradingsymbol")
-            exch = h.get("exchange", "NSE")
-            token = None
-            isin = ""
-            if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
-                tsym = ts[0].get("tradingsymbol", "N/A")
-                exch = ts[0].get("exchange", exch)
-                token = ts[0].get("token")
-                isin = ts[0].get("isin", "")
-                qty = safe_float(ts[0].get("dp_qty", h.get("dp_qty", 0)))
-            else:
-                tsym = ts if isinstance(ts, str) else "N/A"
-                token = h.get("token")
-                isin = h.get("isin", "")
-                qty = safe_float(h.get("dp_qty", 0))
+        # Calculate P&L only if LTP is available and >0
+        if ltp and ltp > 0:
+            current_value = ltp * qty
+            pnl = current_value - invested
+        else:
+            current_value = ""
+            pnl = ""
 
-            avg_buy = safe_float(h.get("avg_buy_price", 0))
-            ltp = get_ltp(exch, token, api_session_key) if token else None
-            prev_close = get_prev_close(exch, token, api_session_key) if token else None
+        # --- TRAILING STOP LOSS LOGIC ---
+        initial_sl = round(entry * 0.97, 2)
+        status = "Initial SL"
+        trailing_sl = initial_sl
 
-            invested = avg_buy * qty if avg_buy is not None else 0.0
-            current = ltp * qty if ltp is not None else 0.0
+        if ltp and ltp > 0:
+            change_pct = 100 * (ltp - entry) / entry if entry else 0
+            # Trailing SL steps
+            if change_pct >= 30:
+                trailing_sl = round(entry * 1.20, 2)
+                status = "Excellent Profit (SL at Entry +20%)"
+            elif change_pct >= 20:
+                trailing_sl = round(entry * 1.10, 2)
+                status = "Good Profit (SL at Entry +10%)"
+            elif change_pct >= 10:
+                trailing_sl = round(entry, 2)
+                status = "Safe (Breakeven SL)"
+        else:
+            change_pct = ""
 
-            today_pnl = (ltp - prev_close) * qty if (ltp is not None and prev_close) else 0.0
-            overall_pnl = (ltp - avg_buy) * qty if (ltp is not None and avg_buy) else 0.0
-            pct_chg = ((ltp - prev_close) / prev_close * 100) if (ltp is not None and prev_close and prev_close != 0) else 0.0
-            pct_chg_avg = ((ltp - avg_buy) / avg_buy * 100) if (ltp is not None and avg_buy and avg_buy != 0) else 0.0
-            realized_pnl = 0.0
+        # Open Risk
+        open_risk = (trailing_sl - entry) * qty
 
-            total_today_pnl += today_pnl
-            total_overall_pnl += overall_pnl
-            total_invested += invested
-            total_current += current
+        rows.append({
+            "Symbol": tsym,
+            "Exchange": exch,
+            "ISIN": isin,
+            "Product": product,
+            "Qty": qty,
+            "Entry": entry,
+            "Invested": invested,
+            "Current Price": ltp if ltp and ltp > 0 else "",
+            "Current Value": current_value,
+            "P&L": pnl,
+            "Change %": round(change_pct, 2) if change_pct != "" else "",
+            "Status": status,
+            "Stop Loss": trailing_sl,
+            "Open Risk": open_risk,
+            "DP Free Qty": h.get("dp_free_qty", ""),
+            "Pledge Qty": h.get("pledge_qty", ""),
+            "Collateral Qty": h.get("collateral_qty", ""),
+            "T1 Qty": h.get("t1_qty", ""),
+        })
 
-            rows.append([
-                tsym,
-                round(ltp, 2) if ltp is not None else "N/A",
-                round(avg_buy, 2) if avg_buy is not None else "N/A",
-                int(qty),
-                round(prev_close, 2) if prev_close is not None else "N/A",
-                round(pct_chg, 2) if ltp is not None else "N/A",
-                round(today_pnl, 2) if ltp is not None else "N/A",
-                round(overall_pnl, 2) if ltp is not None else "N/A",
-                round(realized_pnl, 2) if realized_pnl else "",
-                round(pct_chg_avg, 2) if ltp is not None else "N/A",
-                round(invested, 2) if invested else "N/A",
-                round(current, 2) if current else "N/A",
-                exch,
-                isin,
-            ])
+    df = pd.DataFrame(rows)
+    if df.empty:
+        st.warning("No active holdings with quantity > 0.")
+        return
 
-            symbol_segment_dict[tsym] = exch
+    # --- Capital Management ---
+    TOTAL_CAPITAL = 650000.0
+    total_invested = df["Invested"].sum()
+    cash_in_hand = max(TOTAL_CAPITAL - total_invested, 0)
+    allocation_percent = (total_invested / TOTAL_CAPITAL * 100) if TOTAL_CAPITAL else 0
 
-        headers = [
-            "Symbol", "LTP", "Avg Buy", "Qty", "P.Close", "%Chg", "Today P&L", "Overall P&L",
-            "Realized P&L", "%Chg Avg", "Invested", "Current", "Exchange", "ISIN"
-        ]
+    st.subheader("💰 Capital Management")
+    colA, colB, colC = st.columns(3)
+    colA.metric("Total Capital", f"₹{TOTAL_CAPITAL:,.0f}")
+    colB.metric("Invested", f"₹{total_invested:,.0f}", f"{allocation_percent:.1f}%")
+    colC.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}")
 
-        df = pd.DataFrame(rows, columns=headers)
-        df = df.sort_values("Invested", ascending=False)
-        portfolio_value = df['Current'].sum()
-        df['Portfolio %'] = (df['Current'] / portfolio_value * 100).round(2)
+    # --- Pie Chart: Allocation (with Cash in Hand) ---
+    df_pie = df[["Symbol", "Invested"]].copy()
+    df_pie = pd.concat([
+        df_pie,
+        pd.DataFrame([{"Symbol": "Cash in Hand", "Invested": cash_in_hand}])
+    ], ignore_index=True)
 
-        df['Action'] = "HOLD"
-        df.loc[df['%Chg Avg'] > 25, 'Action'] = "CONSIDER PARTIAL PROFIT"
-        df.loc[df['%Chg Avg'] < -15, 'Action'] = "REVIEW STOP LOSS"
-        df.loc[df['Portfolio %'] > 15, 'Action'] = "CONSIDER REDUCE"
-        df.loc[(df['%Chg'] < -5) & (df['%Chg Avg'] < -10), 'Action'] = "MONITOR CLOSELY"
+    st.subheader("Portfolio Allocation Pie (with Cash)")
+    fig = px.pie(
+        df_pie,
+        names="Symbol",
+        values="Invested",
+        title="Allocation by Stock & Cash",
+        hole=0.3
+    )
+    fig.update_traces(textinfo='label+percent')
+    st.plotly_chart(fig, use_container_width=True)
 
-        df['Insights'] = df.apply(lambda row: generate_insights(row, portfolio_value), axis=1)
+    # --- Main Holdings Table with all columns and P&L color ---
+    st.subheader("Holdings Details Table (with Trailing SL & Open Risk)")
+    st.dataframe(
+        df.style.applymap(
+            highlight_pnl,
+            subset=["P&L", "Open Risk"]
+        ),
+        use_container_width=True,
+    )
 
-        search = st.text_input("🔍 Search Symbol (filter):")
-        if search.strip():
-            df = df[df['Symbol'].str.contains(search.strip(), case=False, na=False)]
+    # --- Totals Summary ---
+    st.subheader("Summary")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Total Invested", f"₹{df['Invested'].sum():,.0f}")
+    col2.metric("Total Current Value", f"₹{df['Current Value'].replace('', 0).sum():,.0f}")
+    col3.metric("Total P&L", f"₹{df['P&L'].replace('', 0).sum():,.0f}")
+    col4.metric("Total Qty", f"{df['Qty'].sum():,.0f}")
+    col5.metric("Total Open Risk", f"₹{df['Open Risk'].sum():,.0f}")
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Value", f"₹{portfolio_value:,.0f}")
-        col2.metric("Total P&L", f"₹{total_overall_pnl:,.0f}", 
-                   f"{total_overall_pnl/total_invested*100:.1f}%" if total_invested else "0%")
-        col3.metric("Today's P&L", f"₹{total_today_pnl:,.0f}")
-        col4.metric("Holdings", len(df))
+    st.info(
+        "Trailing Stop Loss logic: "
+        "Initial SL = Entry - 3%. "
+        "If gain >10%, SL moves to Entry (Safe). "
+        "If gain >20%, SL = Entry +10% (Good Profit). "
+        "If gain >30%, SL = Entry +20% (Excellent Profit)."
+    )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            fig = px.pie(df, names="Symbol", values="Current", 
-                         title="Portfolio Allocation", hole=0.3)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            risk_df = df.copy()
-            risk_df['Risk Score'] = np.where(
-                risk_df['%Chg Avg'] < -10, 3, 
-                np.where(risk_df['Portfolio %'] > 10, 2, 1)
-            )
-            fig = px.bar(risk_df, x='Symbol', y='Current', color='Risk Score',
-                         title="Risk Exposure (Size & Performance)",
-                         color_continuous_scale="RdYlGn_r")
-            st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("Holdings Analysis")
-        def color_action(val):
-            if "PROFIT" in val: return 'background-color: #4CAF50; color: white'
-            if "REDUCE" in val: return 'background-color: #FF9800'
-            if "REVIEW" in val: return 'background-color: #F44336; color: white'
-            if "MONITOR" in val: return 'background-color: #FFEB3B'
-            return ''
-        styled_df = df.style.applymap(highlight_pnl, 
-            subset=["Today P&L", "Overall P&L", "%Chg", "%Chg Avg"]
-        ).applymap(color_action, subset=["Action"])
-        st.dataframe(
-            styled_df,
-            use_container_width=True,
-            column_order=["Symbol", "LTP", "Avg Buy", "%Chg", "%Chg Avg", 
-                          "Today P&L", "Overall P&L", "Portfolio %", "Action"]
-        )
-
-        st.subheader("📈 Technical Analysis for Decision Support")
-        holding_symbols = list(symbol_segment_dict.keys())
-        if holding_symbols:
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                selected_symbol = st.selectbox("Select Holding", sorted(holding_symbols))
-                segment = symbol_segment_dict[selected_symbol]
-                token = get_token(selected_symbol, segment, master_df)
-                st.subheader("Technical Settings")
-                show_ema = st.checkbox("Moving Averages", value=True)
-                show_rsi = st.checkbox("RSI Indicator", value=True)
-                show_macd = st.checkbox("MACD", value=True)
-                days_back = st.slider("Days to Show", 30, 365, 90)
-                if token:
-                    from_dt, to_dt = get_time_range(days_back)
-                    try:
-                        chart_df = fetch_candles_definedge(segment, token, from_dt, to_dt, api_key=api_session_key)
-                        chart_df = chart_df.sort_values("Date")
-                        if show_ema:
-                            chart_df['EMA20'] = chart_df['Close'].ewm(span=20, adjust=False).mean()
-                            chart_df['EMA50'] = chart_df['Close'].ewm(span=50, adjust=False).mean()
-                        if show_rsi:
-                            chart_df['RSI'] = compute_rsi(chart_df)
-                        if show_macd:
-                            macd, signal = compute_macd(chart_df)
-                            chart_df['MACD'] = macd
-                            chart_df['Signal'] = signal
-                        rows = 1
-                        row_heights = [1.0]
-                        specs = [[{"secondary_y": True}]]
-                        if show_rsi and show_macd:
-                            rows = 3
-                            row_heights = [0.6, 0.2, 0.2]
-                            specs = [[{"secondary_y": True}], [{}], [{}]]
-                        elif show_rsi or show_macd:
-                            rows = 2
-                            row_heights = [0.7, 0.3]
-                            specs = [[{"secondary_y": True}], [{}]]
-                        fig = make_subplots(
-                            rows=rows, 
-                            cols=1,
-                            shared_xaxes=True,
-                            vertical_spacing=0.05,
-                            row_heights=row_heights,
-                            specs=specs
-                        )
+    # ================== Chart & Mark Minervini Analysis ==================
+    st.subheader("📈 Technical Analysis & Minervini Sell Signals")
+    holding_symbols = df["Symbol"].unique()
+    if len(holding_symbols):
+        chart_col, info_col = st.columns([2, 1])
+        with info_col:
+            selected_symbol = st.selectbox("Select Holding for Chart", sorted(holding_symbols))
+            # Segment for token lookup, default to NSE or use exchange if available
+            segment = df[df["Symbol"] == selected_symbol]["Exchange"].values[0] if not df[df["Symbol"] == selected_symbol].empty else "NSE"
+            token = get_token(selected_symbol, segment, master_df)
+            show_ema = st.checkbox("Show EMAs", value=True)
+            show_rsi = st.checkbox("Show RSI", value=True)
+            show_macd = st.checkbox("Show MACD", value=True)
+            days_back = st.slider("Chart Days", 30, 365, 90)
+        if token:
+            from_dt, to_dt = get_time_range(days_back)
+            try:
+                chart_df = fetch_candles_definedge(segment, token, from_dt, to_dt, api_key=api_session_key)
+                chart_df = chart_df.sort_values("Date")
+                if show_ema:
+                    chart_df['EMA20'] = chart_df['Close'].ewm(span=20, adjust=False).mean()
+                    chart_df['EMA50'] = chart_df['Close'].ewm(span=50, adjust=False).mean()
+                if show_rsi:
+                    chart_df['RSI'] = compute_rsi(chart_df)
+                if show_macd:
+                    macd, signal = compute_macd(chart_df)
+                    chart_df['MACD'] = macd
+                    chart_df['Signal'] = signal
+                with chart_col:
+                    rows_chart = 1
+                    row_heights = [1.0]
+                    specs = [[{"secondary_y": True}]]
+                    if show_rsi and show_macd:
+                        rows_chart = 3
+                        row_heights = [0.6, 0.2, 0.2]
+                        specs = [[{"secondary_y": True}], [{}], [{}]]
+                    elif show_rsi or show_macd:
+                        rows_chart = 2
+                        row_heights = [0.7, 0.3]
+                        specs = [[{"secondary_y": True}], [{}]]
+                    fig = make_subplots(
+                        rows=rows_chart, 
+                        cols=1,
+                        shared_xaxes=True,
+                        vertical_spacing=0.05,
+                        row_heights=row_heights,
+                        specs=specs
+                    )
+                    fig.add_trace(
+                        go.Candlestick(
+                            x=chart_df["Date"],
+                            open=chart_df["Open"],
+                            high=chart_df["High"],
+                            low=chart_df["Low"],
+                            close=chart_df["Close"],
+                            name="Price"
+                        ),
+                        row=1, col=1
+                    )
+                    if show_ema:
                         fig.add_trace(
-                            go.Candlestick(
+                            go.Scatter(
                                 x=chart_df["Date"],
-                                open=chart_df["Open"],
-                                high=chart_df["High"],
-                                low=chart_df["Low"],
-                                close=chart_df["Close"],
-                                name="Price"
+                                y=chart_df["EMA20"],
+                                mode="lines",
+                                name="20 EMA",
+                                line=dict(color="blue", width=1.5)
                             ),
                             row=1, col=1
                         )
-                        if show_ema:
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=chart_df["Date"],
-                                    y=chart_df["EMA20"],
-                                    mode="lines",
-                                    name="20 EMA",
-                                    line=dict(color="blue", width=1.5)
-                                ),
-                                row=1, col=1
-                            )
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=chart_df["Date"],
-                                    y=chart_df["EMA50"],
-                                    mode="lines",
-                                    name="50 EMA",
-                                    line=dict(color="orange", width=1.5)
-                                ),
-                                row=1, col=1
-                            )
-                        if show_rsi:
-                            rsi_row = 2 if not show_macd else 2
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=chart_df["Date"],
-                                    y=chart_df["RSI"],
-                                    mode="lines",
-                                    name="RSI",
-                                    line=dict(color="purple", width=1.5)
-                                ),
-                                row=rsi_row, col=1
-                            )
-                            fig.add_hline(
-                                y=30, line_dash="dash", line_color="green",
-                                row=rsi_row, col=1
-                            )
-                            fig.add_hline(
-                                y=70, line_dash="dash", line_color="red",
-                                row=rsi_row, col=1
-                            )
-                        if show_macd:
-                            macd_row = 2 if not show_rsi else 3
-                            fig.add_trace(
-                                go.Bar(
-                                    x=chart_df["Date"],
-                                    y=chart_df["MACD"],
-                                    name="MACD",
-                                    marker_color=np.where(chart_df['MACD'] > 0, 'green', 'red')
-                                ),
-                                row=macd_row, col=1
-                            )
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=chart_df["Date"],
-                                    y=chart_df["Signal"],
-                                    mode="lines",
-                                    name="Signal",
-                                    line=dict(color="blue", width=1.5)
-                                ),
-                                row=macd_row, col=1
-                            )
-                        fig.update_layout(
-                            height=600,
-                            title=f"{selected_symbol} Technical Analysis",
-                            showlegend=True,
-                            xaxis_rangeslider_visible=False
+                        fig.add_trace(
+                            go.Scatter(
+                                x=chart_df["Date"],
+                                y=chart_df["EMA50"],
+                                mode="lines",
+                                name="50 EMA",
+                                line=dict(color="orange", width=1.5)
+                            ),
+                            row=1, col=1
                         )
-                        st.plotly_chart(fig, use_container_width=True)
-                        last_row = chart_df.iloc[-1]
-                        insights = []
-                        if show_ema:
-                            if 'EMA20' in chart_df.columns and 'EMA50' in chart_df.columns:
-                                if last_row['Close'] > last_row['EMA20'] > last_row['EMA50']:
-                                    insights.append("✅ Bullish trend (Price > 20EMA > 50EMA)")
-                                elif last_row['Close'] < last_row['EMA20'] < last_row['EMA50']:
-                                    insights.append("❌ Bearish trend (Price < 20EMA < 50EMA)")
-                        if show_rsi and 'RSI' in chart_df.columns:
-                            if last_row['RSI'] > 70:
-                                insights.append("⚠️ Overbought (RSI > 70)")
-                            elif last_row['RSI'] < 30:
-                                insights.append("⚠️ Oversold (RSI < 30)")
-                        if show_macd and 'MACD' in chart_df.columns and 'Signal' in chart_df.columns:
-                            if last_row['MACD'] > last_row['Signal']:
-                                insights.append("↑ Bullish MACD crossover")
-                            else:
-                                insights.append("↓ Bearish MACD crossover")
-                        if insights:
-                            st.subheader("Technical Insights")
-                            for insight in insights:
-                                st.info(insight)
-                        st.subheader("🔔 Minervini Sell Signals Analysis")
-                        minervini_lookback = st.slider("Analysis Lookback (days)", 7, 30, 15, key="minervini_lookback")
-                        try:
-                            signals = minervini_sell_signals(chart_df, minervini_lookback)
-                            if signals.get('error'):
-                                st.warning(signals['error'])
-                            else:
-                                col1, col2, col3 = st.columns(3)
-                                col1.metric("Up Days", f"{signals['up_days']}/{minervini_lookback}")
-                                col2.metric("Up Day %", f"{signals['up_day_percent']:.1f}%")
-                                col3.metric("Largest Up Day", f"{signals['largest_up_day']:.2f}%")
-                                col4, col5, col6 = st.columns(3)
-                                col4.metric("Largest Spread", f"₹{signals['largest_spread']:.2f}")
-                                col5.metric("Exhaustion Gap", "Yes" if signals['exhaustion_gap'] else "No")
-                                col6.metric("Volume Reversal", "Yes" if signals['high_volume_reversal'] else "No")
-                                if signals['warnings']:
-                                    st.error("## Sell Signals Detected")
-                                    for warning in signals['warnings']:
-                                        st.error(warning)
-                                    st.markdown("""
-                                    ### Minervini's Sell Recommendations:
-                                    - **Sell into strength** when these signals appear
-                                    - Consider **partial profits** on large gains
-                                    - **Exit completely** if multiple signals confirm
-                                    """)
-                                else:
-                                    st.success("No strong sell signals detected")
-                                    st.info("""
-                                    ### Minervini's Strength Indicators:
-                                    - Stock is showing healthy price action
-                                    - Continue monitoring for sell signals
-                                    - Consider holding until signals appear
-                                    """)
-                                with st.expander("View Recent Price Action"):
-                                    recent = chart_df.tail(minervini_lookback).copy()
-                                    recent['Change'] = recent['Close'].pct_change() * 100
-                                    recent['Spread'] = recent['High'] - recent['Low']
-                                    st.dataframe(recent[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change', 'Spread']])
-                        except Exception as e:
-                            st.error(f"Error in Minervini analysis: {e}")
-                    except Exception as e:
-                        st.error(f"Error fetching chart data: {e}")
-                else:
-                    st.warning("Token not found for selected symbol")
-        st.subheader("📋 Position Management Guide")
-        st.write("""
-        - **HOLD**: Fundamentals intact, technicals neutral/positive  
-        - **CONSIDER PARTIAL PROFIT**: Significant gains (>25%), consider taking some profits  
-        - **REVIEW STOP LOSS**: Significant unrealized loss (>15%), review risk management  
-        - **CONSIDER REDUCE**: Position >15% of portfolio, high concentration risk  
-        - **MONITOR CLOSELY**: Negative momentum and negative performance  
-        """)
-    except Exception as e:
-        st.error(f"Error loading holdings: {e}")
+                    if show_rsi:
+                        rsi_row = 2 if not show_macd else 2
+                        fig.add_trace(
+                            go.Scatter(
+                                x=chart_df["Date"],
+                                y=chart_df["RSI"],
+                                mode="lines",
+                                name="RSI",
+                                line=dict(color="purple", width=1.5)
+                            ),
+                            row=rsi_row, col=1
+                        )
+                        fig.add_hline(
+                            y=30, line_dash="dash", line_color="green",
+                            row=rsi_row, col=1
+                        )
+                        fig.add_hline(
+                            y=70, line_dash="dash", line_color="red",
+                            row=rsi_row, col=1
+                        )
+                    if show_macd:
+                        macd_row = 2 if not show_rsi else 3
+                        fig.add_trace(
+                            go.Bar(
+                                x=chart_df["Date"],
+                                y=chart_df["MACD"],
+                                name="MACD",
+                                marker_color=np.where(chart_df['MACD'] > 0, 'green', 'red')
+                            ),
+                            row=macd_row, col=1
+                        )
+                        fig.add_trace(
+                            go.Scatter(
+                                x=chart_df["Date"],
+                                y=chart_df["Signal"],
+                                mode="lines",
+                                name="Signal",
+                                line=dict(color="blue", width=1.5)
+                            ),
+                            row=macd_row, col=1
+                        )
+                    fig.update_layout(
+                        height=600,
+                        title=f"{selected_symbol} Technical Analysis",
+                        showlegend=True,
+                        xaxis_rangeslider_visible=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                # Minervini block (always below chart)
+                st.markdown("#### Minervini Sell Signals")
+                minervini_lookback = st.slider("Analysis Lookback (days)", 7, 30, 15, key="minervini_lookback")
+                try:
+                    signals = minervini_sell_signals(chart_df, minervini_lookback)
+                    if signals.get('error'):
+                        st.warning(signals['error'])
+                    else:
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Up Days", f"{signals['up_days']}/{minervini_lookback}")
+                        col2.metric("Up Day %", f"{signals['up_day_percent']:.1f}%")
+                        col3.metric("Largest Up Day", f"{signals['largest_up_day']:.2f}%")
+                        col4, col5, col6 = st.columns(3)
+                        col4.metric("Largest Spread", f"₹{signals['largest_spread']:.2f}")
+                        col5.metric("Exhaustion Gap", "Yes" if signals['exhaustion_gap'] else "No")
+                        col6.metric("Volume Reversal", "Yes" if signals['high_volume_reversal'] else "No")
+                        if signals['warnings']:
+                            st.error("## Sell Signals Detected")
+                            for warning in signals['warnings']:
+                                st.error(warning)
+                        else:
+                            st.success("No strong sell signals detected")
+                except Exception as e:
+                    st.error(f"Error in Minervini analysis: {e}")
+            except Exception as e:
+                st.error(f"Error fetching chart data: {e}")
 
 if __name__ == "__main__":
     show()
