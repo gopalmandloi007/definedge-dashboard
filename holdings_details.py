@@ -140,3 +140,6 @@ st.dataframe(
 )
 
 st.info("You can edit all stop losses above and click Save. Reset sets all to -2% of entry. Download for record keeping.")
+
+if __name__ == "__main__":
+    show()
