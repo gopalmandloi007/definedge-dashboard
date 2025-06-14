@@ -334,7 +334,26 @@ def show():
     fig.update_traces(textinfo='label+percent')
     st.plotly_chart(fig, use_container_width=True)
 
-    # Table Show/Hide Toggle
+    # --- Risk Exposure Size & Performance Histogram Chart ---
+    st.subheader("Risk Exposure (Size & Performance)")
+    risk_df = df.copy()
+    risk_df['Risk Score'] = np.where(
+        risk_df['Open Risk'] > 0, 3,
+        np.where(risk_df['P&L'] < 0, 2, 1)
+    )
+    risk_df['Performance %'] = np.where(
+        risk_df['Invested'] > 0, risk_df['P&L'] / risk_df['Invested'] * 100, 0
+    ).round(1)
+    fig_risk = px.bar(
+        risk_df, x='Symbol', y='Current Value',
+        color='Risk Score',
+        color_continuous_scale="RdYlGn_r",
+        title="Risk Exposure by Size & Performance",
+        hover_data=['Performance %', 'Open Risk', 'P&L']
+    )
+    fig_risk.update_layout(xaxis_title="Stock", yaxis_title="Current Value (₹)")
+    st.plotly_chart(fig_risk, use_container_width=True)
+
     show_table = st.toggle("Show Holdings Table", value=False)
     if show_table:
         st.subheader("Holdings Details Table (with Trailing SL & Open Risk)")
@@ -498,26 +517,44 @@ def show():
                 signals = minervini_sell_signals(chart_df, minervini_lookback)
                 if signals.get('error'):
                     st.warning(signals['error'])
-                elif signals['warnings']:
-                    st.error(f"🚨 Sell Signals Detected for {selected_symbol} stock")
-                    for warning in signals['warnings']:
-                        st.error(warning)
                 else:
-                    st.success("No strong sell signals detected")
-                # ---- Minervini Recent Price Action Table ----
-                recent = chart_df.tail(minervini_lookback).copy()
-                recent['Change'] = recent['Close'].pct_change() * 100
-                recent['Spread'] = recent['High'] - recent['Low']
-                recent_table = recent[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change', 'Spread']].copy()
-                recent_table['Date'] = recent_table['Date'].dt.strftime('%Y-%m-%d')
-                st.markdown(f"#### Recent Price Action (last {minervini_lookback} days)")
-                st.dataframe(
-                    recent_table.style.applymap(
-                        lambda x: 'color:green' if isinstance(x, float) and x > 0 else ('color:red' if isinstance(x, float) and x < 0 else ''),
-                        subset=["Change"]
-                    ),
-                    use_container_width=True
-                )
+                    st.markdown(f"#### Minervini Sell Signals Analysis ({selected_symbol})")
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Up Days", f"{signals['up_days']}/{minervini_lookback}")
+                    col2.metric("Up Day %", f"{signals['up_day_percent']:.1f}%")
+                    col3.metric("Largest Up Day", f"{signals['largest_up_day']:.2f}%")
+                    col4, col5, col6 = st.columns(3)
+                    col4.metric("Largest Spread", f"₹{signals['largest_spread']:.2f}")
+                    col5.metric("Exhaustion Gap", "Yes" if signals['exhaustion_gap'] else "No")
+                    col6.metric("Volume Reversal", "Yes" if signals['high_volume_reversal'] else "No")
+                    # Only bullet points / signals
+                    if signals['warnings']:
+                        st.error(f"🚨 Sell Signals Detected for {selected_symbol} stock")
+                        for warning in signals['warnings']:
+                            st.write(f"- {warning}")
+                        st.markdown("""
+**Minervini's Sell Recommendations:**
+- Sell into strength when these signals appear
+- Consider partial profits on large gains
+- Exit completely if multiple signals confirm
+                        """)
+                    else:
+                        st.success("No strong sell signals detected")
+                        st.markdown("""
+**Minervini's Strength Indicators:**
+- Stock is showing healthy price action
+- Continue monitoring for sell signals
+- Consider holding until signals appear
+                        """)
+                    st.markdown("""
+---
+📋 **Position Management Guide**
+- **HOLD**: Fundamentals intact, technicals neutral/positive  
+- **CONSIDER PARTIAL PROFIT**: Significant gains (>25%), consider taking some profits  
+- **REVIEW STOP LOSS**: Significant unrealized loss (>15%), review risk management  
+- **CONSIDER REDUCE**: Position >15% of portfolio, high concentration risk  
+- **MONITOR CLOSELY**: Negative momentum and negative performance  
+""")
 
             except Exception as e:
                 st.error(f"Error fetching chart data: {e}")
