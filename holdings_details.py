@@ -30,6 +30,47 @@ def get_token(symbol, segment, master_df):
         return row2.iloc[0]['token']
     return None
 
+def get_ltp(exchange, token, api_session_key):
+    if not exchange or not token:
+        return None
+    url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{token}"
+    headers = {"Authorization": api_session_key}
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            ltp = resp.json().get("ltp", None)
+            return float(ltp) if ltp is not None else None
+    except Exception:
+        pass
+    return None
+
+def get_prev_close(exchange, token, api_session_key):
+    today = datetime.now()
+    for i in range(1, 5):
+        prev_day = today - timedelta(days=i)
+        if prev_day.weekday() < 5:
+            break
+    else:
+        prev_day = today - timedelta(days=1)
+    from_str = prev_day.strftime("%d%m%Y0000")
+    to_str = today.strftime("%d%m%Y1530")
+    url = f"https://data.definedgesecurities.com/sds/history/{exchange}/{token}/day/{from_str}/{to_str}"
+    headers = {"Authorization": api_session_key}
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            rows = resp.text.strip().split("\n")
+            if len(rows) >= 2:
+                prev_row = rows[-2]
+                prev_close = float(prev_row.split(",")[4])
+                return prev_close
+            elif len(rows) == 1:
+                prev_close = float(rows[0].split(",")[4])
+                return prev_close
+    except Exception:
+        pass
+    return None
+
 def fetch_candles_definedge(segment, token, from_dt, to_dt, api_key):
     url = f"https://data.definedgesecurities.com/sds/history/{segment}/{token}/day/{from_dt}/{to_dt}"
     headers = {"Authorization": api_key}
@@ -173,7 +214,7 @@ def show():
         st.warning("No holdings found.")
         return
 
-    # --- Prepare DataFrame with all details (from your code, full, not shortened) ---
+    # --- Prepare DataFrame with all details with TRUE LTP fetch ---
     rows = []
     for h in holdings:
         # Symbol extraction (robust)
@@ -182,27 +223,36 @@ def show():
             if ts:
                 if isinstance(ts[0], dict):
                     tsym = ts[0].get("tradingsymbol", "N/A")
+                    exch = ts[0].get("exchange", h.get("exchange", "NSE"))
+                    segment = ts[0].get("segment", exch)
                 else:
                     tsym = str(ts[0])
+                    exch = h.get("exchange", "NSE")
+                    segment = exch
             else:
                 tsym = "N/A"
+                exch = h.get("exchange", "NSE")
+                segment = exch
         elif isinstance(ts, dict):
             tsym = ts.get("tradingsymbol", "N/A")
+            exch = ts.get("exchange", h.get("exchange", "NSE"))
+            segment = ts.get("segment", exch)
         else:
             tsym = str(ts) if ts is not None else "N/A"
+            exch = h.get("exchange", "NSE")
+            segment = exch
 
-        exch = h.get("exchange", "NSE")
         isin = h.get("isin", "")
         product = h.get("product", "")
         qty = float(h.get("dp_qty", 0) or 0)
         entry = float(h.get("avg_buy_price", 0) or 0)
         invested = entry * qty
 
-        ltp = h.get("ltp", None)
-        try:
-            ltp = float(ltp) if ltp is not None else None
-        except:
-            ltp = None
+        # LTP fetch using API!
+        token = get_token(tsym, segment, master_df)
+        ltp = get_ltp(exch, token, api_session_key) if token else None
+        if not ltp or ltp == 0:
+            ltp = get_prev_close(exch, token, api_session_key) if token else None
 
         # Calculate P&L only if LTP is available and >0
         if ltp and ltp > 0:
@@ -219,7 +269,6 @@ def show():
 
         if ltp and ltp > 0:
             change_pct = 100 * (ltp - entry) / entry if entry else 0
-            # Trailing SL steps
             if change_pct >= 30:
                 trailing_sl = round(entry * 1.20, 2)
                 status = "Excellent Profit (SL at Entry +20%)"
@@ -232,7 +281,6 @@ def show():
         else:
             change_pct = ""
 
-        # Open Risk
         open_risk = (trailing_sl - entry) * qty
 
         rows.append({
@@ -243,7 +291,7 @@ def show():
             "Qty": qty,
             "Entry": entry,
             "Invested": invested,
-            "Current Price": ltp if ltp and ltp > 0 else "",
+            "Current Price": ltp if ltp else "",
             "Current Value": current_value,
             "P&L": pnl,
             "Change %": round(change_pct, 2) if change_pct != "" else "",
