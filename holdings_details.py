@@ -53,23 +53,25 @@ if df.empty:
 # --- Capital Management ---
 st.sidebar.header("💰 Capital Management")
 if "total_capital" not in st.session_state:
-    st.session_state.total_capital = df["Invested"].sum() + 200000  # default add cash buffer
+    st.session_state.total_capital = 650000.0  # Default as per your requirement
 
 total_capital = st.sidebar.number_input(
     "Total Capital (Invested + Cash)",
-    min_value=0.0,
+    min_value=1.0,  # Avoid zero for division
     value=st.session_state.total_capital,
     step=10000.0,
     key="total_capital_input"
 )
 st.session_state.total_capital = total_capital
 
-cash_in_hand = st.session_state.total_capital - df["Invested"].sum()
-allocation_percent = (df["Invested"].sum() / st.session_state.total_capital * 100) if st.session_state.total_capital else 0
+# Recalculate invested, cash and allocation %
+total_invested = df["Invested"].sum()
+cash_in_hand = max(st.session_state.total_capital - total_invested, 0)
+allocation_percent = (total_invested / st.session_state.total_capital * 100) if st.session_state.total_capital else 0
 
 colA, colB, colC = st.columns(3)
 colA.metric("Total Capital", f"₹{st.session_state.total_capital:,.0f}")
-colB.metric("Invested", f"₹{df['Invested'].sum():,.0f}", f"{allocation_percent:.1f}%")
+colB.metric("Invested", f"₹{total_invested:,.0f}", f"{allocation_percent:.1f}%")
 colC.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}")
 
 # --- Stop Loss Table ---
@@ -114,12 +116,26 @@ col2.metric("Risk % of Total Capital", f"{(total_risk/st.session_state.total_cap
 
 # --- Pie Chart: Allocation ---
 st.subheader("Portfolio Allocation Pie")
-fig = px.pie(edited_df, names="Symbol", values="Invested", title="Allocation by Stock", hole=0.3)
+fig = px.pie(
+    edited_df, 
+    names="Symbol", 
+    values="Invested", 
+    title="Allocation by Stock", 
+    hole=0.3
+)
+fig.update_traces(textinfo='label+percent')
 st.plotly_chart(fig, use_container_width=True)
 
 # --- Pie Chart: Risk Distribution ---
 st.subheader("Risk Distribution Pie")
-fig2 = px.pie(edited_df, names="Symbol", values="Open Risk", title="Open Risk by Stock", hole=0.3)
+fig2 = px.pie(
+    edited_df, 
+    names="Symbol", 
+    values="Open Risk", 
+    title="Open Risk by Stock", 
+    hole=0.3
+)
+fig2.update_traces(textinfo='label+percent')
 st.plotly_chart(fig2, use_container_width=True)
 
 # --- Download CSV Option ---
@@ -140,6 +156,3 @@ st.dataframe(
 )
 
 st.info("You can edit all stop losses above and click Save. Reset sets all to -2% of entry. Download for record keeping.")
-
-if __name__ == "__main__":
-    show()
