@@ -204,14 +204,11 @@ def open_risk_status(open_risk):
     else:
         return "At Risk"
 
-# ================== MAIN DASHBOARD ==================
 def show():
     st.title("Holdings Details Dashboard")
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
     master_df = load_master()
-
-    # --- Fetch holdings data ---
     data = integrate_get("/holdings")
     holdings = data.get("data", [])
     if not holdings:
@@ -262,7 +259,6 @@ def show():
             current_value = ""
             pnl = ""
 
-        # --- Trailing SL logic ---
         initial_sl = round(entry * 0.97, 2)
         status = "Initial SL"
         trailing_sl = initial_sl
@@ -310,7 +306,6 @@ def show():
         st.warning("No active holdings with quantity > 0.")
         return
 
-    # --- Capital Management ---
     TOTAL_CAPITAL = 650000.0
     total_invested = df["Invested"].sum()
     cash_in_hand = max(TOTAL_CAPITAL - total_invested, 0)
@@ -322,7 +317,6 @@ def show():
     colB.metric("Invested", f"₹{total_invested:,.0f}", f"{allocation_percent:.1f}%")
     colC.metric("Cash in Hand", f"₹{cash_in_hand:,.0f}")
 
-    # --- Pie Chart: Allocation (with Cash in Hand) ---
     df_pie = df[["Symbol", "Invested"]].copy()
     df_pie = pd.concat([
         df_pie,
@@ -340,24 +334,23 @@ def show():
     fig.update_traces(textinfo='label+percent')
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- Main Holdings Table with all columns and P&L color ---
-    st.subheader("Holdings Details Table (with Trailing SL & Open Risk)")
-    st.dataframe(
-        df.style.applymap(
-            highlight_pnl,
-            subset=["P&L", "Open Risk"]
-        ),
-        use_container_width=True,
-    )
+    # Table Show/Hide Toggle
+    show_table = st.toggle("Show Holdings Table", value=False)
+    if show_table:
+        st.subheader("Holdings Details Table (with Trailing SL & Open Risk)")
+        st.dataframe(
+            df.style.applymap(
+                highlight_pnl,
+                subset=["P&L", "Open Risk"]
+            ),
+            use_container_width=True,
+        )
+        st.write("#### 🟢 Open Risk Status: If **'Risk Free (Profit Locked)'** hai, toh stoploss pe bhi minimum profit locked hai!")
+        st.dataframe(
+            df[["Symbol", "Entry", "Stop Loss", "Open Risk", "Open Risk Status"]],
+            use_container_width=True
+        )
 
-    # --- Table for Open Risk Status ---
-    st.write("#### 🟢 Open Risk Status: If **'Risk Free (Profit Locked)'** hai, toh stoploss pe bhi minimum profit locked hai!")
-    st.dataframe(
-        df[["Symbol", "Entry", "Stop Loss", "Open Risk", "Open Risk Status"]],
-        use_container_width=True
-    )
-
-    # --- Totals Summary ---
     st.subheader("Summary")
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Total Invested", f"₹{df['Invested'].sum():,.0f}")
@@ -374,7 +367,6 @@ def show():
         "If gain >30%, SL = Entry +20% (Excellent Profit)."
     )
 
-    # ================== Chart & Mark Minervini Analysis (Full Width, Vertical) ==================
     st.subheader("📈 Technical Analysis & Minervini Sell Signals")
     holding_symbols = df["Symbol"].unique()
     if len(holding_symbols):
@@ -390,6 +382,7 @@ def show():
             try:
                 chart_df = fetch_candles_definedge(segment, token, from_dt, to_dt, api_key=api_session_key)
                 chart_df = chart_df.sort_values("Date")
+                chart_df = chart_df[chart_df["Date"] <= pd.Timestamp.now()]  # Remove future
                 if show_ema:
                     chart_df['EMA20'] = chart_df['Close'].ewm(span=20, adjust=False).mean()
                     chart_df['EMA50'] = chart_df['Close'].ewm(span=50, adjust=False).mean()
@@ -400,7 +393,6 @@ def show():
                     chart_df['MACD'] = macd
                     chart_df['Signal'] = signal
 
-                # --- FULL WIDTH, STACKED CHARTS ---
                 rows_chart = 1
                 row_heights = [1.0]
                 specs = [[{"secondary_y": True}]]
@@ -422,7 +414,7 @@ def show():
                 )
                 fig.add_trace(
                     go.Candlestick(
-                        x=chart_df["Date"],
+                        x=chart_df["Date"].dt.strftime('%Y-%m-%d'),
                         open=chart_df["Open"],
                         high=chart_df["High"],
                         low=chart_df["Low"],
@@ -434,7 +426,7 @@ def show():
                 if show_ema:
                     fig.add_trace(
                         go.Scatter(
-                            x=chart_df["Date"],
+                            x=chart_df["Date"].dt.strftime('%Y-%m-%d'),
                             y=chart_df["EMA20"],
                             mode="lines",
                             name="20 EMA",
@@ -444,7 +436,7 @@ def show():
                     )
                     fig.add_trace(
                         go.Scatter(
-                            x=chart_df["Date"],
+                            x=chart_df["Date"].dt.strftime('%Y-%m-%d'),
                             y=chart_df["EMA50"],
                             mode="lines",
                             name="50 EMA",
@@ -456,7 +448,7 @@ def show():
                     rsi_row = 2 if not show_macd else 2
                     fig.add_trace(
                         go.Scatter(
-                            x=chart_df["Date"],
+                            x=chart_df["Date"].dt.strftime('%Y-%m-%d'),
                             y=chart_df["RSI"],
                             mode="lines",
                             name="RSI",
@@ -476,7 +468,7 @@ def show():
                     macd_row = 2 if not show_rsi else 3
                     fig.add_trace(
                         go.Bar(
-                            x=chart_df["Date"],
+                            x=chart_df["Date"].dt.strftime('%Y-%m-%d'),
                             y=chart_df["MACD"],
                             name="MACD",
                             marker_color=np.where(chart_df['MACD'] > 0, 'green', 'red')
@@ -485,7 +477,7 @@ def show():
                     )
                     fig.add_trace(
                         go.Scatter(
-                            x=chart_df["Date"],
+                            x=chart_df["Date"].dt.strftime('%Y-%m-%d'),
                             y=chart_df["Signal"],
                             mode="lines",
                             name="Signal",
@@ -494,36 +486,25 @@ def show():
                         row=macd_row, col=1
                     )
                 fig.update_layout(
-                    height=800, # Chart aur bada kar diya!
+                    height=900,
                     title=f"{selected_symbol} Technical Analysis",
                     showlegend=True,
+                    xaxis=dict(type="category"),  # Remove holiday/future gaps
                     xaxis_rangeslider_visible=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                st.markdown("#### Minervini Sell Signals")
                 minervini_lookback = st.slider("Analysis Lookback (days)", 7, 30, 15, key="minervini_lookback")
-                try:
-                    signals = minervini_sell_signals(chart_df, minervini_lookback)
-                    if signals.get('error'):
-                        st.warning(signals['error'])
-                    else:
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Up Days", f"{signals['up_days']}/{minervini_lookback}")
-                        col2.metric("Up Day %", f"{signals['up_day_percent']:.1f}%")
-                        col3.metric("Largest Up Day", f"{signals['largest_up_day']:.2f}%")
-                        col4, col5, col6 = st.columns(3)
-                        col4.metric("Largest Spread", f"₹{signals['largest_spread']:.2f}")
-                        col5.metric("Exhaustion Gap", "Yes" if signals['exhaustion_gap'] else "No")
-                        col6.metric("Volume Reversal", "Yes" if signals['high_volume_reversal'] else "No")
-                        if signals['warnings']:
-                            st.error("## Sell Signals Detected")
-                            for warning in signals['warnings']:
-                                st.error(warning)
-                        else:
-                            st.success("No strong sell signals detected")
-                except Exception as e:
-                    st.error(f"Error in Minervini analysis: {e}")
+                signals = minervini_sell_signals(chart_df, minervini_lookback)
+                if signals.get('error'):
+                    st.warning(signals['error'])
+                elif signals['warnings']:
+                    st.error(f"🚨 Sell Signals Detected for {selected_symbol} stock")
+                    for warning in signals['warnings']:
+                        st.error(warning)
+                else:
+                    st.success("No strong sell signals detected")
+
             except Exception as e:
                 st.error(f"Error fetching chart data: {e}")
 
