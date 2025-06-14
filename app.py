@@ -6,6 +6,7 @@ st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 
 PAGES = {
     "Holdings": "holdings",
+    "Holdings Details": "holdings_details",   # <-- Add this line for your details page
     "Positions": "positions",
     "Order Book": "orderbook",
     "Orders": "orders",
