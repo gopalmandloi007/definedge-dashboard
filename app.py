@@ -1,4 +1,5 @@
 import streamlit as st
+st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
 import importlib
 import os  # <-- Add this line
 
