@@ -1,6 +1,30 @@
 import streamlit as st
 from utils import integrate_post
 import requests
+import pandas as pd
+
+@st.cache_data
+def load_master_symbols():
+    df = pd.read_csv("master.csv", sep="\t", header=None)
+    # Handles both 14 and 15 column master files
+    if df.shape[1] == 15:
+        df.columns = [
+            "segment", "token", "symbol", "symbol_series", "series", "unknown1",
+            "unknown2", "unknown3", "series2", "unknown4", "unknown5", "unknown6",
+            "isin", "unknown7", "company"
+        ]
+        df = df[["symbol", "series", "segment"]]
+    else:
+        df.columns = [
+            "segment", "token", "symbol", "instrument", "series", "isin1",
+            "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
+        ]
+        df = df[["symbol", "series", "segment"]]
+    # Only EQ & BE series, and only NSE/BSE stocks (not derivatives, indices)
+    df = df[df["series"].isin(["EQ", "BE"])]
+    df = df[df["segment"].isin(["NSE", "BSE"])]
+    df = df.drop_duplicates(subset=["symbol", "series"])
+    return df.sort_values("symbol")
 
 def get_ltp(tradingsymbol, exchange, api_session_key):
     try:
@@ -37,19 +61,29 @@ def show():
     st.markdown('<div class="order-box">', unsafe_allow_html=True)
     st.header("Order Place", divider="rainbow")
 
+    # Load symbols for dropdown (EQ/BE)
+    master_df = load_master_symbols()
+    symbol_list = master_df["symbol"].unique().tolist()
+    symbol_default = "RELIANCE" if "RELIANCE" in symbol_list else symbol_list[0] if symbol_list else ""
+
     col1, col2, col3, col4 = st.columns([2,2,2,2], gap="large")
 
     with col1:
-        tradingsymbol = st.text_input("Symbol", key="ts", placeholder="RELIANCE", label_visibility="visible")
+        tradingsymbol = st.selectbox("Symbol", symbol_list, index=symbol_list.index(symbol_default) if symbol_default in symbol_list else 0, key="ts")
+        # Auto-detect exchange based on selection
+        symbol_rows = master_df[master_df["symbol"] == tradingsymbol]
+        # If both exchanges exist for the symbol, pick NSE by default
+        exchange_options = symbol_rows["segment"].unique().tolist()
+        exchange = st.selectbox("Exch", exchange_options, index=0, key="exch")
         price_type = st.selectbox("Type", ["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"], key="pt")
     with col2:
-        exchange = st.selectbox("Exch", ["NSE", "BSE", "NFO", "BFO", "CDS", "MCX"], key="exch")
         validity = st.selectbox("Validity", ["DAY", "IOC", "EOS"], key="val")
-    with col3:
         order_type = st.selectbox("Side", ["BUY", "SELL"], key="ot")
         product_type = st.selectbox("Product", ["CNC", "INTRADAY", "NORMAL"], key="prod")
-    with col4:
+    with col3:
         qty_or_amt = st.radio("Order By", ["Qty", "Amt"], horizontal=True, key="qty_or_amt")
+    with col4:
+        remarks = st.text_input("Remarks (optional)", key="rem")
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
 
@@ -57,11 +91,10 @@ def show():
     if tradingsymbol and exchange:
         ltp = get_ltp(tradingsymbol, exchange, api_session_key)
 
-    price = st.number_input("Price", min_value=0.0, value=0.0, step=0.05, key="pr", format="%.2f")
+    price = st.number_input("Price", min_value=0.0, value=ltp if ltp > 0 else 0.0, step=0.05, key="pr", format="%.2f")
 
     colQ, colA, colT, colD, colAMO = st.columns([2,2,2,2,2], gap="large")
 
-    # Corrected: use price, not LTP, for auto qty
     if qty_or_amt == "Amt":
         with colA:
             amount = st.number_input("₹ Amt", min_value=0.0, step=100.0, key="amt", format="%.2f")
@@ -83,7 +116,6 @@ def show():
         disclosed_quantity = st.number_input("Disc Qty", min_value=0, value=0, step=1, key="dis_qty")
     with colAMO:
         amo = st.checkbox("AMO?", key="amo")
-    remarks = st.text_input("Remarks (optional)", key="rem")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -120,3 +152,6 @@ def show():
         resp = integrate_post("/placeorder", data)
         st.success("Order submitted!")
         st.json(resp)
+
+if __name__ == "__main__":
+    show()
