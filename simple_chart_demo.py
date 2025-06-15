@@ -4,6 +4,7 @@ import requests
 import io
 from datetime import datetime, timedelta
 import plotly.graph_objs as go
+import numpy as np
 
 @st.cache_data
 def load_master():
@@ -16,17 +17,14 @@ def load_master():
     return df[["segment", "token", "symbol", "symbol_series", "series", "company"]]
 
 def get_token(symbol, segment, series, master_df):
-    # Try to match on symbol, symbol_series, segment, and series (case insensitive)
     candidates = master_df[
         (master_df['segment'].str.upper() == segment.upper()) &
         ((master_df['symbol'].str.upper() == symbol.upper()) | (master_df['symbol_series'].str.upper() == symbol.upper()))
     ]
     if not candidates.empty:
-        # Prefer exact series match if present
         row = candidates[candidates['series'].str.upper() == series.upper()]
         if not row.empty:
             return row.iloc[0]['token']
-        # Fallback: return first candidate
         return candidates.iloc[0]['token']
     return None
 
@@ -55,6 +53,21 @@ def get_time_range(days, endtime="1530"):
     frm = to - timedelta(days=days)
     return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
 
+def compute_relative_strength(stock_df, index_df):
+    # Align by date, drop NaN, and calculate RS = stock_return / index_return
+    merged = pd.merge(
+        stock_df[["Date", "Close"]],
+        index_df[["Date", "Close"]].rename(columns={"Close": "IndexClose"}),
+        on="Date",
+        how="inner"
+    ).dropna()
+    if len(merged) < 10:
+        return pd.Series(dtype="float64")
+    # Calculate ratio series (stock / index)
+    rs_series = merged["Close"] / merged["IndexClose"]
+    rs_series.index = merged["Date"]
+    return rs_series
+
 def show():
     st.header("Definedge Simple Candlestick Chart Demo (Daily, Live)")
 
@@ -64,27 +77,21 @@ def show():
     segment_options = sorted(master_df["segment"].str.upper().unique())
     segment = st.selectbox("Segment", segment_options, index=0)
 
-    # Show all unique symbol+series display names for this segment
     df_segment = master_df[master_df["segment"].str.upper() == segment]
-    # Compose display names: symbol (series) for clarity
     df_segment["display_name"] = df_segment.apply(
         lambda r: f"{r['symbol']} ({r['series']})" if pd.notnull(r['series']) else r['symbol'], axis=1
     )
-    # Only show each symbol+series combo once
     df_segment = df_segment.drop_duplicates(subset=["symbol", "series"])
     symbol_display_list = df_segment["display_name"].tolist()
     symbol_idx = 0
     symbol_display = st.selectbox("Symbol", symbol_display_list, index=symbol_idx)
 
-    # Get selected row for this display name
     selected_row = df_segment[df_segment["display_name"] == symbol_display].iloc[0]
     symbol = selected_row["symbol"]
-    # For stocks, allow EQ/BE, for indices force IDX
     possible_series = df_segment[df_segment["symbol"] == symbol]["series"].unique()
     if len(possible_series) == 1:
         series = possible_series[0]
     else:
-        # Let user pick if multiple (e.g. EQ/BE for stocks)
         series = st.selectbox("Series", possible_series, index=0)
 
     st.write("Selected:", segment, symbol, series)
@@ -94,6 +101,27 @@ def show():
         show_ema20 = st.checkbox("Show 20 EMA", value=True)
     with col4:
         show_ema50 = st.checkbox("Show 50 EMA", value=True)
+
+    st.markdown("### Relative Strength Settings")
+    rs_index_option = st.selectbox(
+        "Relative Strength vs Index",
+        ["Nifty 500", "Nifty 50"],
+        index=0
+    )
+
+    # Identify index symbol and series
+    index_row = None
+    index_symbol = None
+    index_series = "IDX"
+    for idx, row in master_df.iterrows():
+        sym = row["symbol"].strip().lower()
+        if (rs_index_option == "Nifty 500" and sym == "nifty 500") or \
+           (rs_index_option == "Nifty 50" and sym == "nifty 50"):
+            index_row = row
+            index_symbol = row["symbol"]
+            if "series" in row and pd.notnull(row["series"]):
+                index_series = row["series"]
+            break
 
     token = get_token(symbol, segment, series, master_df)
     if not token:
@@ -110,6 +138,19 @@ def show():
     if df.empty:
         st.warning("No data fetched for this symbol.")
         return
+
+    # Fetch index candles for RS
+    if index_row is not None:
+        index_token = index_row["token"]
+        index_segment = index_row["segment"]
+        try:
+            index_df = fetch_candles_definedge(index_segment, index_token, from_dt, to_dt, api_key)
+        except Exception as e:
+            st.warning(f"Error fetching {rs_index_option} candles: {e}")
+            index_df = None
+    else:
+        index_df = None
+        st.warning(f"{rs_index_option} not found in master file, RS will not be shown.")
 
     df = df.sort_values("Date")
     chart_df = df.tail(60).copy()
@@ -155,7 +196,31 @@ def show():
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
 
-    st.info("This chart shows daily candles including the latest available data from Definedge API. Toggle 20/50 EMA above.")
+    # Show Relative Strength plot
+    if index_df is not None and not index_df.empty:
+        rs_series = compute_relative_strength(df, index_df)
+        if not rs_series.empty:
+            st.markdown(f"### Relative Strength vs {rs_index_option}")
+            rs_fig = go.Figure()
+            rs_fig.add_trace(go.Scatter(
+                x=rs_series.index.strftime("%Y-%m-%d"),
+                y=rs_series,
+                mode="lines",
+                name="RS"
+            ))
+            rs_fig.update_layout(
+                height=250,
+                margin=dict(l=10, r=10, t=30, b=10),
+                title=f"Relative Strength: {symbol} / {rs_index_option}",
+                xaxis=dict(type="category")
+            )
+            st.plotly_chart(rs_fig, use_container_width=True)
+        else:
+            st.info("Not enough data to plot Relative Strength.")
+    else:
+        st.info("Index data not available for Relative Strength.")
+
+    st.info("This chart shows daily candles and relative strength vs selected index using Definedge API.")
 
 if __name__ == "__main__":
     show()
