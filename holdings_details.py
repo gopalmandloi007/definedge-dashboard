@@ -11,22 +11,38 @@ from utils import integrate_get
 
 @st.cache_data
 def load_master():
+    # Supports both 14 and 15 column master.csv automatically
     df = pd.read_csv("master.csv", sep="\t", header=None)
-    df.columns = [
-        "segment", "token", "symbol", "instrument", "series", "isin1",
-        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
-    ]
-    return df[["segment", "token", "symbol", "instrument"]]
+    if df.shape[1] == 15:
+        df.columns = [
+            "segment", "token", "symbol", "symbol_series", "series", "unknown1",
+            "unknown2", "unknown3", "series2", "unknown4", "unknown5", "unknown6",
+            "isin", "unknown7", "company"
+        ]
+        return df[["segment", "token", "symbol", "symbol_series", "series"]]
+    else:  # legacy 14-column
+        df.columns = [
+            "segment", "token", "symbol", "instrument", "series", "isin1",
+            "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
+        ]
+        return df[["segment", "token", "symbol", "instrument", "series"]]
 
 def get_token(symbol, segment, master_df):
     symbol = str(symbol).strip().upper()
     segment = str(segment).strip().upper()
-    row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
+    # Try symbol
+    row = master_df[(master_df['symbol'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
     if not row.empty:
         return row.iloc[0]['token']
-    row2 = master_df[(master_df['instrument'] == symbol) & (master_df['segment'] == segment)]
-    if not row2.empty:
-        return row2.iloc[0]['token']
+    # Try symbol_series (for 15-col), or instrument (for 14-col)
+    if "symbol_series" in master_df.columns:
+        row2 = master_df[(master_df['symbol_series'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
+        if not row2.empty:
+            return row2.iloc[0]['token']
+    if "instrument" in master_df.columns:
+        row3 = master_df[(master_df['instrument'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
+        if not row3.empty:
+            return row3.iloc[0]['token']
     return None
 
 def get_ltp(exchange, token, api_session_key):
@@ -52,7 +68,7 @@ def get_prev_close(exchange, token, api_session_key):
     else:
         prev_day = today - timedelta(days=1)
     from_str = prev_day.strftime("%d%m%Y0000")
-    to_str = today.strftime("%d%m%Y1530")
+    to_str = today.strftime("%d%m%Y%H%M")
     url = f"https://data.definedgesecurities.com/sds/history/{exchange}/{token}/day/{from_str}/{to_str}"
     headers = {"Authorization": api_session_key}
     try:
@@ -349,7 +365,6 @@ def show():
     fig.update_traces(textinfo='label+percent')
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- Risk Exposure Size & Performance Histogram Chart ---
     st.subheader("Risk Exposure (Size & Performance)")
     risk_df = df.copy()
     risk_df['Risk Score'] = np.where(
