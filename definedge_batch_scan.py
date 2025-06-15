@@ -32,6 +32,8 @@ def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
     df = df[df["Dateandtime"].astype(str).str.strip() != ""]
     df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d%m%Y%H%M", errors="coerce")
     df = df.dropna(subset=["Date"])
+    # Remove any future dates (important for correct charting)
+    df = df[df["Date"] <= pd.Timestamp.today()]
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
@@ -163,6 +165,8 @@ def scan_symbols(
     return pd.DataFrame(result)
 
 def plot_candlestick(df):
+    # Remove any future dates (important!)
+    df = df[df['Date'] <= pd.Timestamp.today()]
     fig = go.Figure(data=[go.Candlestick(
         x=df['Date'],
         open=df['Open'],
@@ -171,7 +175,16 @@ def plot_candlestick(df):
         close=df['Close'],
         name='Candlestick'
     )])
-    fig.update_layout(xaxis_rangeslider_visible=False)
+    # Hide weekends (no trading), hide future dates (if any)
+    fig.update_layout(
+        xaxis=dict(
+            rangeslider_visible=False,
+            rangebreaks=[
+                dict(bounds=["sat", "mon"]), # Hide weekends
+                # You can add Indian market holidays here as dict(values=[...]) for even cleaner charts
+            ]
+        )
+    )
     return fig
 
 def show():
@@ -230,15 +243,39 @@ def show():
             st.warning("No symbols matched the criteria.")
             return
         st.dataframe(scan_df)
-        symbol_sel = st.selectbox("See candlestick for symbol:", scan_df["Symbol"])
-        row = scan_df[scan_df["Symbol"] == symbol_sel].iloc[0]
-        segment, token = row["segment"], row["token"]
-        from_dt, to_dt = get_time_range(days)
-        try:
-            df = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
-            st.plotly_chart(plot_candlestick(df), use_container_width=True)
-        except Exception as e:
-            st.error(f"Error fetching candle data: {e}")
+
+        # Always fetch Nifty 500 chart data for display
+        nifty_row = master_df[master_df["symbol"].str.lower() == NIFTY500_SYMBOL.lower()]
+        nifty_df = None
+        if not nifty_row.empty:
+            nseg, ntok = nifty_row.iloc[0][["segment", "token"]]
+            from_dt, to_dt = get_time_range(days)
+            try:
+                nifty_df = fetch_candles_definedge(nseg, ntok, "day", from_dt, to_dt, api_key)
+            except Exception as e:
+                st.warning(f"Could not fetch Nifty 500 chart data: {e}")
+
+        cols = st.columns(2)
+        # Nifty 500 chart always (left side)
+        with cols[0]:
+            st.subheader("Nifty 500 Chart")
+            if nifty_df is not None and not nifty_df.empty:
+                st.plotly_chart(plot_candlestick(nifty_df), use_container_width=True)
+            else:
+                st.warning("Nifty 500 chart data not available.")
+
+        # Stock selection and chart (right side)
+        with cols[1]:
+            symbol_sel = st.selectbox("See candlestick for symbol:", scan_df["Symbol"])
+            row = scan_df[scan_df["Symbol"] == symbol_sel].iloc[0]
+            segment, token = row["segment"], row["token"]
+            from_dt, to_dt = get_time_range(days)
+            try:
+                df = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
+                st.subheader(f"{symbol_sel} Chart")
+                st.plotly_chart(plot_candlestick(df), use_container_width=True)
+            except Exception as e:
+                st.error(f"Error fetching candle data: {e}")
 
     st.info("Select watchlist and filters, then click 'Run Symbol Scan' to find matching symbols and visualize price action.")
 
