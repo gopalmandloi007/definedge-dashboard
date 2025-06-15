@@ -9,10 +9,11 @@ from datetime import datetime, timedelta
 def load_master():
     df = pd.read_csv("master.csv", sep="\t", header=None)
     df.columns = [
-        "segment", "token", "symbol", "instrument", "series", "isin1",
-        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
+        "segment", "token", "symbol", "symbol_series", "series", "unknown1",
+        "unknown2", "unknown3", "series2", "unknown4", "unknown5", "unknown6",
+        "isin", "unknown7", "company"
     ]
-    return df[["segment", "token", "symbol", "instrument"]]
+    return df[["segment", "token", "symbol", "symbol_series", "series", "company"]]
 
 def get_token(symbol, segment, master_df):
     symbol = symbol.strip().upper()
@@ -20,7 +21,7 @@ def get_token(symbol, segment, master_df):
     row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
     if not row.empty:
         return row.iloc[0]['token']
-    row2 = master_df[(master_df['instrument'] == symbol) & (master_df['segment'] == segment)]
+    row2 = master_df[(master_df['symbol_series'] == symbol) & (master_df['segment'] == segment)]
     if not row2.empty:
         return row2.iloc[0]['token']
     return None
@@ -162,3 +163,6 @@ def show():
     st.dataframe(daily.tail(15)[["Date", "Open", "High", "Low", "Close", "EMA20", "EMA50", "EMA200", "RSI"]])
 
     st.info("All data is fetched from Definedge Historical Data API using your master file.")
+
+if __name__ == "__main__":
+    show()
