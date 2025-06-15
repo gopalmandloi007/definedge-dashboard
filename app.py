@@ -2,7 +2,7 @@ import streamlit as st
 import importlib
 
 # Set page config ONCE at the top
-st.set_page_config(page_title="Definedge Integrate Dashboard", layout="wide")
+st.set_page_config(page_title="Gopal Mandloi_Dashboard", layout="wide")
 
 PAGES = {
     "Holdings": "holdings",
