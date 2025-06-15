@@ -18,7 +18,7 @@ WATCHLIST_FILES = [
     "watchlist_7.csv",
 ]
 
-NIFTY500_SYMBOL = "Nifty 500"  # Case-insensitive match
+NIFTY500_SYMBOL = "nifty 500"  # Always lowercase for matching
 
 def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
     url = f"https://data.definedgesecurities.com/sds/history/{segment}/{token}/{timeframe}/{from_dt}/{to_dt}"
@@ -32,8 +32,7 @@ def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
     df = df[df["Dateandtime"].astype(str).str.strip() != ""]
     df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d%m%Y%H%M", errors="coerce")
     df = df.dropna(subset=["Date"])
-    # Remove any future dates (important for correct charting)
-    df = df[df["Date"] <= pd.Timestamp.today()]
+    df = df[df['Date'] <= pd.Timestamp.today()]
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
@@ -60,37 +59,33 @@ def get_time_range(days, endtime="1530"):
     frm = to - timedelta(days=days)
     return frm.strftime("%d%m%Y%H%M"), to.strftime("%d%m%Y%H%M")
 
+def get_nifty500_row(master_df):
+    # Robust: match by symbol (lowercase, strip), ignore last column 'company' if blank
+    for idx, row in master_df.iterrows():
+        symbol = str(row.get('symbol', '')).strip().lower()
+        if symbol == NIFTY500_SYMBOL:
+            return row
+    return None
+
 def scan_symbols(
     master_df, api_key, updown_window=15, days=120, ema_ltp_thr=0.95, ema_ratio_thr=0.95,
     rsi_enabled=False, rsi_threshold=None, rsi_direction="Above",
-    ema_scan_enabled=False, ema_condition="Price above 20EMA", show_rs=True
+    ema_scan_enabled=False, ema_condition="Price above 20EMA", show_rs=True,
+    nifty_df=None  # Pass the already-fetched Nifty 500 df for RS calc
 ):
     result = []
-    # Get Nifty 500 data for RS calculation if needed
-    nifty_row = master_df[master_df["symbol"].str.lower() == NIFTY500_SYMBOL.lower()]
-    nifty_df = None
-    if show_rs and not nifty_row.empty:
-        nseg, ntok = nifty_row.iloc[0][["segment", "token"]]
-        from_dt, to_dt = get_time_range(days)
-        try:
-            nifty_df = fetch_candles_definedge(nseg, ntok, "day", from_dt, to_dt, api_key)
-            if len(nifty_df) < 2:
-                nifty_df = None
-        except Exception:
-            nifty_df = None
-
     for idx, row in master_df.iterrows():
         segment = row['segment']
         token = row['token']
         symbol = row['symbol']
         instrument = row['instrument']
         company = row['company'] if "company" in row else ""
-        if symbol.lower() == NIFTY500_SYMBOL.lower():
+        if str(symbol).strip().lower() == NIFTY500_SYMBOL:
             continue  # Skip Nifty 500 itself
         try:
             from_dt, to_dt = get_time_range(days)
             df = fetch_candles_definedge(segment, token, "day", from_dt, to_dt, api_key)
-            if len(df) < 50:  # Need at least 50 for EMA/RSI
+            if len(df) < 50:
                 continue
             df["EMA20"] = compute_ema(df["Close"], 20)
             df["EMA50"] = compute_ema(df["Close"], 50)
@@ -100,7 +95,6 @@ def scan_symbols(
             ema50 = df["EMA50"].iloc[-1]
             rsi14 = df["RSI14"].iloc[-1]
 
-            # RSI condition
             rsi_status = ""
             if rsi_enabled and rsi_threshold is not None:
                 if rsi_direction == "Above" and rsi14 > rsi_threshold:
@@ -108,9 +102,8 @@ def scan_symbols(
                 elif rsi_direction == "Below" and rsi14 < rsi_threshold:
                     rsi_status = f"RSI {rsi14:.1f} < {rsi_threshold}"
                 else:
-                    continue  # Skip if not matching
+                    continue
 
-            # EMA scan
             ema_status = ""
             if ema_scan_enabled:
                 if ema_condition == "Price above 20EMA" and ltp > ema20:
@@ -122,11 +115,11 @@ def scan_symbols(
                 elif ema_condition == "20EMA below 50EMA" and ema20 < ema50:
                     ema_status = "20EMA < 50EMA"
                 else:
-                    continue  # Skip if not matching
+                    continue
 
-            # Relative Strength (RS) vs Nifty 500 (robust version)
+            # RS Calculation
             rs_score, rs_flag = np.nan, ""
-            if show_rs and nifty_df is not None:
+            if show_rs and nifty_df is not None and not nifty_df.empty:
                 merged = pd.merge(
                     df[["Date", "Close"]],
                     nifty_df[["Date", "Close"]].rename(columns={"Close": "NiftyClose"}),
@@ -139,7 +132,9 @@ def scan_symbols(
                     if nifty_return != 0:
                         rs_score = stock_return / nifty_return
                         rs_flag = "Outperform" if rs_score > 1 else "Underperform"
-            # Main scan logic
+            elif show_rs:
+                rs_flag = "Nifty 500 data unavailable"
+
             ema20_ltp = ema20 / ltp if ltp else np.nan
             ema50_ema20 = ema50 / ema20 if ema20 else np.nan
             if (
@@ -165,7 +160,6 @@ def scan_symbols(
     return pd.DataFrame(result)
 
 def plot_candlestick(df):
-    # Remove any future dates (important!)
     df = df[df['Date'] <= pd.Timestamp.today()]
     fig = go.Figure(data=[go.Candlestick(
         x=df['Date'],
@@ -175,13 +169,11 @@ def plot_candlestick(df):
         close=df['Close'],
         name='Candlestick'
     )])
-    # Hide weekends (no trading), hide future dates (if any)
     fig.update_layout(
         xaxis=dict(
             rangeslider_visible=False,
             rangebreaks=[
-                dict(bounds=["sat", "mon"]), # Hide weekends
-                # You can add Indian market holidays here as dict(values=[...]) for even cleaner charts
+                dict(bounds=["sat", "mon"]),
             ]
         )
     )
@@ -232,28 +224,34 @@ def show():
     st.sidebar.markdown("---")
     show_rs = st.sidebar.checkbox("Show Relative Strength vs Nifty 500", value=True)
 
+    # --- Fetch Nifty 500 data ONCE robustly ---
+    nifty500_row = get_nifty500_row(master_df)
+    nifty_df = None
+    nifty500_error = ""
+    if nifty500_row is not None:
+        nseg, ntok = nifty500_row['segment'], nifty500_row['token']
+        from_dt, to_dt = get_time_range(days)
+        try:
+            nifty_df = fetch_candles_definedge(nseg, ntok, "day", from_dt, to_dt, api_key)
+            if nifty_df.empty:
+                nifty500_error = "Nifty 500 candle data empty."
+        except Exception as e:
+            nifty500_error = str(e)
+    else:
+        nifty500_error = "'Nifty 500' symbol not found in your master/watchlist file."
+
     if st.button("Run Symbol Scan"):
         st.info("Scanning symbols, please wait...")
         scan_df = scan_symbols(
             master_df, api_key, updown_window, days, ema_ltp_thr, ema_ratio_thr,
             rsi_enabled, rsi_threshold, rsi_direction,
-            ema_scan_enabled, ema_condition, show_rs
+            ema_scan_enabled, ema_condition, show_rs,
+            nifty_df=nifty_df
         )
         if scan_df.empty:
             st.warning("No symbols matched the criteria.")
             return
         st.dataframe(scan_df)
-
-        # Always fetch Nifty 500 chart data for display
-        nifty_row = master_df[master_df["symbol"].str.lower() == NIFTY500_SYMBOL.lower()]
-        nifty_df = None
-        if not nifty_row.empty:
-            nseg, ntok = nifty_row.iloc[0][["segment", "token"]]
-            from_dt, to_dt = get_time_range(days)
-            try:
-                nifty_df = fetch_candles_definedge(nseg, ntok, "day", from_dt, to_dt, api_key)
-            except Exception as e:
-                st.warning(f"Could not fetch Nifty 500 chart data: {e}")
 
         cols = st.columns(2)
         # Nifty 500 chart always (left side)
@@ -262,7 +260,7 @@ def show():
             if nifty_df is not None and not nifty_df.empty:
                 st.plotly_chart(plot_candlestick(nifty_df), use_container_width=True)
             else:
-                st.warning("Nifty 500 chart data not available.")
+                st.warning(f"Nifty 500 chart data not available. {nifty500_error}")
 
         # Stock selection and chart (right side)
         with cols[1]:
