@@ -137,7 +137,6 @@ def scan_symbols(
                     if nifty_return != 0:
                         rs_score = stock_return / nifty_return
                         rs_flag = "Outperform" if rs_score > 1 else "Underperform"
-
             # Main scan logic
             ema20_ltp = ema20 / ltp if ltp else np.nan
             ema50_ema20 = ema50 / ema20 if ema20 else np.nan
