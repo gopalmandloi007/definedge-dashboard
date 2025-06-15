@@ -7,12 +7,14 @@ import plotly.graph_objs as go
 
 @st.cache_data
 def load_master():
+    # Corrected: loader expects 15 columns (your new format)
     df = pd.read_csv("master.csv", sep="\t", header=None)
     df.columns = [
-        "segment", "token", "symbol", "instrument", "series", "isin1",
-        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
+        "segment", "token", "symbol", "symbol_series", "series", "unknown1",
+        "unknown2", "unknown3", "series2", "unknown4", "unknown5", "unknown6",
+        "isin", "unknown7", "company"
     ]
-    return df[["segment", "token", "symbol", "instrument"]]
+    return df[["segment", "token", "symbol", "symbol_series", "series", "company"]]
 
 def get_token(symbol, segment, master_df):
     symbol = symbol.strip().upper()
@@ -20,7 +22,8 @@ def get_token(symbol, segment, master_df):
     row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
     if not row.empty:
         return row.iloc[0]['token']
-    row2 = master_df[(master_df['instrument'] == symbol) & (master_df['segment'] == segment)]
+    # Try symbol_series as fallback for index names
+    row2 = master_df[(master_df['symbol_series'] == symbol) & (master_df['segment'] == segment)]
     if not row2.empty:
         return row2.iloc[0]['token']
     return None
@@ -45,7 +48,6 @@ def fetch_candles_definedge(segment, token, from_dt, to_dt, api_key):
     return df
 
 def get_time_range(days, endtime="1530"):
-    # Always end at today (Indian market close time)
     now = datetime.now()
     to = now.replace(hour=15, minute=30, second=0, microsecond=0)
     if to > now:
@@ -67,7 +69,6 @@ def show():
         symbol = st.selectbox("Symbol", sorted(symbol_list), index=0)
     st.write("Selected:", segment, symbol)
 
-    # EMA checkboxes
     col3, col4 = st.columns(2)
     with col3:
         show_ema20 = st.checkbox("Show 20 EMA", value=True)
@@ -99,7 +100,6 @@ def show():
     if show_ema50:
         chart_df['EMA50'] = chart_df['Close'].ewm(span=50, adjust=False).mean()
 
-    # Make the plot
     fig = go.Figure()
     fig.add_trace(go.Candlestick(
         x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
@@ -109,7 +109,6 @@ def show():
         close=chart_df["Close"],
         name="Candles"
     ))
-    # EMA overlays
     if show_ema20:
         fig.add_trace(go.Scatter(
             x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
@@ -132,7 +131,7 @@ def show():
         margin=dict(l=10, r=10, t=30, b=10),
         xaxis_rangeslider_visible=False,
         title=f"{symbol} Daily Candlestick Chart",
-        xaxis=dict(type="category")  # removes Sat/Sun/holiday gaps
+        xaxis=dict(type="category")
     )
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
