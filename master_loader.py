@@ -2,7 +2,7 @@ import pandas as pd
 
 def load_watchlist(filename):
     df = pd.read_csv(filename, sep="\t", header=None)
-    # Assign only as many columns as in the file
+    # Assign as many columns as present in the file (up to 15)
     columns = [
         "segment", "token", "symbol", "instrument", "series", "isin1",
         "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
