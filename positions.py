@@ -9,22 +9,38 @@ from utils import integrate_get
 
 @st.cache_data
 def load_master():
+    # Supports both 14 and 15 column master.csv automatically
     df = pd.read_csv("master.csv", sep="\t", header=None)
-    df.columns = [
-        "segment", "token", "symbol", "instrument", "series", "isin1",
-        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
-    ]
-    return df[["segment", "token", "symbol", "instrument"]]
+    if df.shape[1] == 15:
+        df.columns = [
+            "segment", "token", "symbol", "symbol_series", "series", "unknown1",
+            "unknown2", "unknown3", "series2", "unknown4", "unknown5", "unknown6",
+            "isin", "unknown7", "company"
+        ]
+        return df[["segment", "token", "symbol", "symbol_series", "series"]]
+    else:  # legacy 14-column
+        df.columns = [
+            "segment", "token", "symbol", "instrument", "series", "isin1",
+            "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
+        ]
+        return df[["segment", "token", "symbol", "instrument", "series"]]
 
 def get_token(symbol, segment, master_df):
     symbol = symbol.strip().upper()
     segment = segment.strip().upper()
-    row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
+    # Try symbol
+    row = master_df[(master_df['symbol'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
     if not row.empty:
         return row.iloc[0]['token']
-    row2 = master_df[(master_df['instrument'] == symbol) & (master_df['segment'] == segment)]
-    if not row2.empty:
-        return row2.iloc[0]['token']
+    # Try symbol_series (for 15-col), or instrument (for 14-col)
+    if "symbol_series" in master_df.columns:
+        row2 = master_df[(master_df['symbol_series'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
+        if not row2.empty:
+            return row2.iloc[0]['token']
+    if "instrument" in master_df.columns:
+        row3 = master_df[(master_df['instrument'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
+        if not row3.empty:
+            return row3.iloc[0]['token']
     return None
 
 def fetch_candles_definedge(segment, token, from_dt, to_dt, api_key):
@@ -101,8 +117,6 @@ def show():
         if not active_holdings:
             st.info("No active holdings for chart.")
             return
-
-        # Your dashboard table and features here...
 
         # Chart section
         st.subheader("📈 Chart: See Candlestick for your Holdings")
