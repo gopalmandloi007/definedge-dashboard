@@ -1,28 +1,17 @@
 import pandas as pd
 
 def load_watchlist(filename):
-    # Read raw lines, ignore empty lines
-    with open(filename, "r", encoding="utf-8") as f:
-        lines = [line for line in f if line.strip()]
-    # Parse each line into fields
-    records = [line.strip().split("\t") for line in lines]
-    # Ignore rows with fewer than 3 columns
-    records = [row for row in records if len(row) >= 3]
-    # Convert to DataFrame
-    df = pd.DataFrame(records)
-    # Assign columns dynamically
-    base_columns = [
+    # Read the file, which now always has 15 columns
+    columns = [
         "segment", "token", "symbol", "instrument", "series", "isin1",
-        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
+        "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2", "company"
     ]
-    df.columns = base_columns[:df.shape[1]]
-    # Ensure these columns always exist
-    for col in ["segment", "token", "symbol", "instrument"]:
-        if col not in df.columns:
-            df[col] = ""
-    # Return only what you need
-    return df[["segment", "token", "symbol", "instrument"]]
+    df = pd.read_csv(filename, sep="\t", header=None, dtype=str)
+    # Assign the first 15 columns only (if extra columns, ignore; if less, will error, which is correct for your standard)
+    df = df.iloc[:, :15]
+    df.columns = columns
+    return df[["segment", "token", "symbol", "instrument", "company"]]
 
 if __name__ == "__main__":
-    df = load_watchlist("watchlist_6.csv")
+    df = load_watchlist("master.csv")
     print(df.head())
