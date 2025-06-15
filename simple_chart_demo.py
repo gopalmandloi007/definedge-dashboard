@@ -7,7 +7,6 @@ import plotly.graph_objs as go
 
 @st.cache_data
 def load_master():
-    # Corrected: loader expects 15 columns (your new format)
     df = pd.read_csv("master.csv", sep="\t", header=None)
     df.columns = [
         "segment", "token", "symbol", "symbol_series", "series", "unknown1",
@@ -16,16 +15,19 @@ def load_master():
     ]
     return df[["segment", "token", "symbol", "symbol_series", "series", "company"]]
 
-def get_token(symbol, segment, master_df):
-    symbol = symbol.strip().upper()
-    segment = segment.strip().upper()
-    row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
-    if not row.empty:
-        return row.iloc[0]['token']
-    # Try symbol_series as fallback for index names
-    row2 = master_df[(master_df['symbol_series'] == symbol) & (master_df['segment'] == segment)]
-    if not row2.empty:
-        return row2.iloc[0]['token']
+def get_token(symbol, segment, series, master_df):
+    # Try to match on symbol, symbol_series, segment, and series (case insensitive)
+    candidates = master_df[
+        (master_df['segment'].str.upper() == segment.upper()) &
+        ((master_df['symbol'].str.upper() == symbol.upper()) | (master_df['symbol_series'].str.upper() == symbol.upper()))
+    ]
+    if not candidates.empty:
+        # Prefer exact series match if present
+        row = candidates[candidates['series'].str.upper() == series.upper()]
+        if not row.empty:
+            return row.iloc[0]['token']
+        # Fallback: return first candidate
+        return candidates.iloc[0]['token']
     return None
 
 def fetch_candles_definedge(segment, token, from_dt, to_dt, api_key):
@@ -38,10 +40,8 @@ def fetch_candles_definedge(segment, token, from_dt, to_dt, api_key):
     df = pd.read_csv(io.StringIO(resp.text), header=None, names=cols)
     df = df[df["Dateandtime"].notnull()]
     df = df[df["Dateandtime"].astype(str).str.strip() != ""]
-    # Parse date, only keep rows with valid dates
     df["Date"] = pd.to_datetime(df["Dateandtime"], format="%d%m%Y%H%M", errors="coerce")
     df = df.dropna(subset=["Date"])
-    # Only keep dates up to today (no future dates!)
     df = df[df["Date"] <= pd.Timestamp.now()]
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -61,13 +61,33 @@ def show():
     api_key = st.secrets.get("integrate_api_session_key", "")
     master_df = load_master()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        segment = st.selectbox("Segment", sorted(master_df["segment"].str.upper().unique()), index=0)
-    with col2:
-        symbol_list = master_df[master_df["segment"] == segment]["symbol"].unique()
-        symbol = st.selectbox("Symbol", sorted(symbol_list), index=0)
-    st.write("Selected:", segment, symbol)
+    segment_options = sorted(master_df["segment"].str.upper().unique())
+    segment = st.selectbox("Segment", segment_options, index=0)
+
+    # Show all unique symbol+series display names for this segment
+    df_segment = master_df[master_df["segment"].str.upper() == segment]
+    # Compose display names: symbol (series) for clarity
+    df_segment["display_name"] = df_segment.apply(
+        lambda r: f"{r['symbol']} ({r['series']})" if pd.notnull(r['series']) else r['symbol'], axis=1
+    )
+    # Only show each symbol+series combo once
+    df_segment = df_segment.drop_duplicates(subset=["symbol", "series"])
+    symbol_display_list = df_segment["display_name"].tolist()
+    symbol_idx = 0
+    symbol_display = st.selectbox("Symbol", symbol_display_list, index=symbol_idx)
+
+    # Get selected row for this display name
+    selected_row = df_segment[df_segment["display_name"] == symbol_display].iloc[0]
+    symbol = selected_row["symbol"]
+    # For stocks, allow EQ/BE, for indices force IDX
+    possible_series = df_segment[df_segment["symbol"] == symbol]["series"].unique()
+    if len(possible_series) == 1:
+        series = possible_series[0]
+    else:
+        # Let user pick if multiple (e.g. EQ/BE for stocks)
+        series = st.selectbox("Series", possible_series, index=0)
+
+    st.write("Selected:", segment, symbol, series)
 
     col3, col4 = st.columns(2)
     with col3:
@@ -75,9 +95,9 @@ def show():
     with col4:
         show_ema50 = st.checkbox("Show 50 EMA", value=True)
 
-    token = get_token(symbol, segment, master_df)
+    token = get_token(symbol, segment, series, master_df)
     if not token:
-        st.error("Symbol-token mapping not found in master file. Try another symbol.")
+        st.error("Symbol-token mapping not found in master file. Try another symbol/series.")
         return
 
     from_dt, to_dt = get_time_range(120)
@@ -94,7 +114,6 @@ def show():
     df = df.sort_values("Date")
     chart_df = df.tail(60).copy()
 
-    # Calculate EMAs if needed
     if show_ema20:
         chart_df['EMA20'] = chart_df['Close'].ewm(span=20, adjust=False).mean()
     if show_ema50:
@@ -130,7 +149,7 @@ def show():
         height=400,
         margin=dict(l=10, r=10, t=30, b=10),
         xaxis_rangeslider_visible=False,
-        title=f"{symbol} Daily Candlestick Chart",
+        title=f"{symbol} ({series}) Daily Candlestick Chart",
         xaxis=dict(type="category")
     )
     st.plotly_chart(fig, use_container_width=True)
