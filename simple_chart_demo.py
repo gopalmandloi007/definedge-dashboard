@@ -77,7 +77,7 @@ def show():
     segment_options = sorted(master_df["segment"].str.upper().unique())
     segment = st.selectbox("Segment", segment_options, index=0)
 
-    df_segment = master_df[master_df["segment"].str.upper() == segment]
+    df_segment = master_df[master_df["segment"].str.upper() == segment].copy()
     df_segment["display_name"] = df_segment.apply(
         lambda r: f"{r['symbol']} ({r['series']})" if pd.notnull(r['series']) else r['symbol'], axis=1
     )
@@ -194,9 +194,8 @@ def show():
         xaxis=dict(type="category")
     )
     st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
 
-    # Show Relative Strength plot
+    # RS chart just below candles
     if index_df is not None and not index_df.empty:
         rs_series = compute_relative_strength(df, index_df)
         if not rs_series.empty:
@@ -219,6 +218,9 @@ def show():
             st.info("Not enough data to plot Relative Strength.")
     else:
         st.info("Index data not available for Relative Strength.")
+
+    # Table comes after RS chart
+    st.dataframe(chart_df[["Date", "Open", "High", "Low", "Close"]].tail(15))
 
     st.info("This chart shows daily candles and relative strength vs selected index using Definedge API.")
 
