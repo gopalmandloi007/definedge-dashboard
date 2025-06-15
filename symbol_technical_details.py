@@ -15,15 +15,16 @@ def load_master():
     ]
     return df[["segment", "token", "symbol", "symbol_series", "series", "company"]]
 
-def get_token(symbol, segment, master_df):
-    symbol = symbol.strip().upper()
-    segment = segment.strip().upper()
-    row = master_df[(master_df['symbol'] == symbol) & (master_df['segment'] == segment)]
-    if not row.empty:
-        return row.iloc[0]['token']
-    row2 = master_df[(master_df['symbol_series'] == symbol) & (master_df['segment'] == segment)]
-    if not row2.empty:
-        return row2.iloc[0]['token']
+def get_token(symbol, segment, series, master_df):
+    candidates = master_df[
+        (master_df['segment'].str.upper() == segment.upper()) &
+        ((master_df['symbol'].str.upper() == symbol.upper()) | (master_df['symbol_series'].str.upper() == symbol.upper()))
+    ]
+    if not candidates.empty:
+        row = candidates[candidates['series'].str.upper() == series.upper()]
+        if not row.empty:
+            return row.iloc[0]['token']
+        return candidates.iloc[0]['token']
     return None
 
 def fetch_candles_definedge(segment, token, timeframe, from_dt, to_dt, api_key):
@@ -90,15 +91,30 @@ def show():
     api_key = st.secrets.get("integrate_api_session_key", "")
     master_df = load_master()
 
+    # Auto select: Segment, then Symbol, then Series
     col1, col2, col3 = st.columns(3)
     with col1:
-        segment = st.selectbox("Segment", sorted(master_df["segment"].str.upper().unique()), index=0)
+        segment_options = sorted(master_df["segment"].str.upper().unique())
+        segment = st.selectbox("Segment", segment_options, index=0)
     with col2:
-        symbol = st.text_input("Symbol (e.g. RELIANCE or RELIANCE-EQ)", value="RELIANCE-EQ").strip().upper()
+        df_segment = master_df[master_df["segment"].str.upper() == segment]
+        df_segment["display_name"] = df_segment.apply(
+            lambda r: f"{r['symbol']} ({r['series']})" if pd.notnull(r['series']) else r['symbol'], axis=1
+        )
+        df_segment = df_segment.drop_duplicates(subset=["symbol", "series"])
+        symbol_display_list = df_segment["display_name"].tolist()
+        symbol_display = st.selectbox("Symbol", symbol_display_list, index=0)
+        selected_row = df_segment[df_segment["display_name"] == symbol_display].iloc[0]
+        symbol = selected_row["symbol"]
     with col3:
+        possible_series = df_segment[df_segment["symbol"] == symbol]["series"].unique()
+        if len(possible_series) == 1:
+            series = possible_series[0]
+        else:
+            series = st.selectbox("Series", possible_series, index=0)
         st.caption("EMAs/RSI are for daily timeframe.")
 
-    token = get_token(symbol, segment, master_df)
+    token = get_token(symbol, segment, series, master_df)
     if not token:
         st.warning("Symbol-token mapping not found in master file. Try exact symbol or instrument code.")
         return
@@ -123,20 +139,9 @@ def show():
     ema20 = daily["EMA20"].iloc[-1]
     ema50 = daily["EMA50"].iloc[-1]
     ema200 = daily["EMA200"].iloc[-1]
-
-    # Show most recent valid RSI for each timeframe, or N/A
-    if daily["RSI"].notna().any():
-        rsi_daily = daily["RSI"].dropna().iloc[-1]
-    else:
-        rsi_daily = np.nan
-    if week_df["RSI"].notna().any():
-        rsi_weekly = week_df["RSI"].dropna().iloc[-1]
-    else:
-        rsi_weekly = np.nan
-    if month_df["RSI"].notna().any():
-        rsi_monthly = month_df["RSI"].dropna().iloc[-1]
-    else:
-        rsi_monthly = np.nan
+    rsi_daily = daily["RSI"].dropna().iloc[-1] if daily["RSI"].notna().any() else np.nan
+    rsi_weekly = week_df["RSI"].dropna().iloc[-1] if week_df["RSI"].notna().any() else np.nan
+    rsi_monthly = month_df["RSI"].dropna().iloc[-1] if month_df["RSI"].notna().any() else np.nan
 
     ema20_ltp = ema20 / ltp if ltp else np.nan
     ema50_ema20 = ema50 / ema20 if ema20 else np.nan
