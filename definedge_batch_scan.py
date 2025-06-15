@@ -8,7 +8,6 @@ import plotly.graph_objs as go
 
 from master_loader import load_watchlist
 
-# List your available CSV files
 WATCHLIST_FILES = [
     "master.csv",
     "watchlist_1.csv",
@@ -79,7 +78,11 @@ def scan_symbols(
             nifty_df = None
 
     for idx, row in master_df.iterrows():
-        segment, token, symbol, instrument = row['segment'], row['token'], row['symbol'], row['instrument']
+        segment = row['segment']
+        token = row['token']
+        symbol = row['symbol']
+        instrument = row['instrument']
+        company = row['company'] if "company" in row else ""
         if symbol.lower() == NIFTY500_SYMBOL.lower():
             continue  # Skip Nifty 500 itself
         try:
@@ -119,17 +122,21 @@ def scan_symbols(
                 else:
                     continue  # Skip if not matching
 
-            # Relative Strength (RS) vs Nifty 500
+            # Relative Strength (RS) vs Nifty 500 (robust version)
             rs_score, rs_flag = np.nan, ""
-            if show_rs and nifty_df is not None and len(nifty_df) == len(df):
-                stock_return = df["Close"].iloc[-1] / df["Close"].iloc[0]
-                nifty_return = nifty_df["Close"].iloc[-1] / nifty_df["Close"].iloc[0]
-                if nifty_return != 0:
-                    rs_score = stock_return / nifty_return
-                    if rs_score > 1:
-                        rs_flag = "Outperform"
-                    else:
-                        rs_flag = "Underperform"
+            if show_rs and nifty_df is not None:
+                merged = pd.merge(
+                    df[["Date", "Close"]],
+                    nifty_df[["Date", "Close"]].rename(columns={"Close": "NiftyClose"}),
+                    on="Date",
+                    how="inner"
+                )
+                if len(merged) >= 2:
+                    stock_return = merged["Close"].iloc[-1] / merged["Close"].iloc[0]
+                    nifty_return = merged["NiftyClose"].iloc[-1] / merged["NiftyClose"].iloc[0]
+                    if nifty_return != 0:
+                        rs_score = stock_return / nifty_return
+                        rs_flag = "Outperform" if rs_score > 1 else "Underperform"
 
             # Main scan logic
             ema20_ltp = ema20 / ltp if ltp else np.nan
@@ -140,6 +147,7 @@ def scan_symbols(
             ):
                 result.append({
                     "Symbol": symbol,
+                    "Company": company,
                     "LTP": ltp,
                     "20EMA": round(ema20, 2),
                     "50EMA": round(ema50, 2),
