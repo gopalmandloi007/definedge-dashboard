@@ -80,48 +80,38 @@ def highlight_pnl(val):
     return 'color: black'
 
 def show():
-    st.header("=========== Holdings Dashboard Pro ===========")
+    st.header("=========== Positions Dashboard Pro ===========")
     api_session_key = st.secrets.get("integrate_api_session_key", "")
     master_df = load_master()
 
     try:
-        data = integrate_get("/holdings")
-        holdings = data.get("data", [])
-        if not holdings:
-            st.info("No holdings found.")
+        data = integrate_get("/positions")
+        positions = data.get("data", [])
+        if not positions:
+            st.info("No positions found.")
             return
 
-        # Prepare holding symbols/segments for chart dropdown
-        active_holdings = []
+        # Prepare symbols/segments for chart dropdown
+        active_positions = []
         symbol_segment_dict = {}
-        for h in holdings:
+        for pos in positions:
             qty = 0.0
-            ts = h.get("tradingsymbol")
-            if isinstance(ts, list) and len(ts) > 0 and isinstance(ts[0], dict):
-                tsym = ts[0].get("tradingsymbol", "N/A")
-                exch = ts[0].get("exchange", h.get("exchange", "NSE"))
-                qty = float(ts[0].get("dp_qty", h.get("dp_qty", 0)))
-            else:
-                tsym = ts if isinstance(ts, str) else "N/A"
-                exch = h.get("exchange", "NSE")
-                qty = float(h.get("dp_qty", 0))
-            if qty > 0:
-                active_holdings.append((tsym, exch))
-                symbol_segment_dict[tsym] = exch
+            ts = pos.get("tradingsymbol")
+            exch = pos.get("exchange", "NSE")
+            # Some APIs send 'quantity', some send 'netqty'
+            qty = float(pos.get("netqty", pos.get("quantity", 0)))
+            if qty != 0:  # Only active (open) positions
+                active_positions.append((ts, exch))
+                symbol_segment_dict[ts] = exch
 
-        df_data = []
-        total_invested = 0.0
-        total_current = 0.0
-        for tsym, exch in active_holdings:
-            df_data.append([tsym, exch])
-        if not active_holdings:
-            st.info("No active holdings for chart.")
+        if not active_positions:
+            st.info("No active positions for chart.")
             return
 
         # Chart section
-        st.subheader("📈 Chart: See Candlestick for your Holdings")
-        holding_symbols = list(symbol_segment_dict.keys())
-        selected_symbol = st.selectbox("Select Holding Symbol for Chart", sorted(holding_symbols))
+        st.subheader("📈 Chart: See Candlestick for your Positions")
+        position_symbols = list(symbol_segment_dict.keys())
+        selected_symbol = st.selectbox("Select Position Symbol for Chart", sorted(position_symbols))
         segment = symbol_segment_dict[selected_symbol]
         token = get_token(selected_symbol, segment, master_df)
         if token:
@@ -176,7 +166,7 @@ def show():
             st.warning("Symbol-token mapping not found in master file for chart.")
 
     except Exception as e:
-        st.error(f"Error loading holdings: {e}")
+        st.error(f"Error loading positions: {e}")
 
 if __name__ == "__main__":
     show()
