@@ -178,7 +178,7 @@ def plot_candlestick(df):
     return fig
 
 def show():
-    st.header("Definedge Batch Symbol Scanner")
+    st.header("Batch Symbol Scanner")
 
     api_key = st.secrets.get("integrate_api_session_key", "")
     if not api_key:
