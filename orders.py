@@ -23,8 +23,9 @@ def load_master_symbols():
     # Only EQ & BE series, and only NSE/BSE stocks (not derivatives, indices)
     df = df[df["series"].isin(["EQ", "BE"])]
     df = df[df["segment"].isin(["NSE", "BSE"])]
-    df = df.drop_duplicates(subset=["symbol", "series"])
-    return df.sort_values("symbol")
+    df = df.drop_duplicates(subset=["symbol", "series", "segment"])
+    df["tradingsymbol"] = df["symbol"] + "-" + df["series"]
+    return df.sort_values("tradingsymbol")
 
 def get_ltp(tradingsymbol, exchange, api_session_key):
     try:
@@ -63,17 +64,16 @@ def show():
 
     # Load symbols for dropdown (EQ/BE)
     master_df = load_master_symbols()
-    symbol_list = master_df["symbol"].unique().tolist()
-    symbol_default = "RELIANCE" if "RELIANCE" in symbol_list else symbol_list[0] if symbol_list else ""
+    symbol_list = master_df["tradingsymbol"].unique().tolist()
+    symbol_default = "RELIANCE-EQ" if "RELIANCE-EQ" in symbol_list else symbol_list[0] if symbol_list else ""
 
     col1, col2, col3, col4 = st.columns([2,2,2,2], gap="large")
 
     with col1:
         tradingsymbol = st.selectbox("Symbol", symbol_list, index=symbol_list.index(symbol_default) if symbol_default in symbol_list else 0, key="ts")
-        # Auto-detect exchange based on selection
-        symbol_rows = master_df[master_df["symbol"] == tradingsymbol]
-        # If both exchanges exist for the symbol, pick NSE by default
-        exchange_options = symbol_rows["segment"].unique().tolist()
+        # Find the row in master_df corresponding to the selected trading symbol
+        selected_row = master_df[master_df["tradingsymbol"] == tradingsymbol].iloc[0]
+        exchange_options = [selected_row["segment"]]
         exchange = st.selectbox("Exch", exchange_options, index=0, key="exch")
         price_type = st.selectbox("Type", ["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"], key="pt")
     with col2:
@@ -132,7 +132,7 @@ def show():
 
     if st.button("Place Order", use_container_width=True, type="primary"):
         data = {
-            "tradingsymbol": tradingsymbol,
+            "tradingsymbol": tradingsymbol,  # Now includes series, e.g. RELIANCE-EQ
             "exchange": exchange,
             "order_type": order_type,
             "quantity": int(qty),
