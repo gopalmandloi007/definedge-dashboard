@@ -86,7 +86,7 @@ def display_metric(label, value):
     st.metric(label, "N/A" if pd.isna(value) else f"{value:.2f}")
 
 def show():
-    st.header("Symbol Technical Details (Definedge)")
+    st.header("Symbol Technical Details")
 
     api_key = st.secrets.get("integrate_api_session_key", "")
     master_df = load_master()
