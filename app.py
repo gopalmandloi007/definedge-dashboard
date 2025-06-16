@@ -18,12 +18,12 @@ PAGES = {
     "GTT Order Place": "gtt_oco_manage",
     "Square Off": "squareoff",
     "Symbol Technical Details": "symbol_technical_details",
-    "Definedge Batch Symbol Scanner": "definedge_batch_scan",
+    "Batch Symbol Scanner": "definedge_batch_scan",
     "Candlestick Demo": "simple_chart_demo",
     "Websocket Help": "websocket_help",
 }
 
-st.title("Definedge Integrate Dashboard")
+st.title("Gopal Mandloi Integrate Dashboard")
 
 page = st.sidebar.radio("Go to", list(PAGES.keys()))
 modulename = PAGES[page]
