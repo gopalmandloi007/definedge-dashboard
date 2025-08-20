@@ -8,12 +8,6 @@ def update_session_state(uid, actid, api_session_key, ws_session_key):
     st.session_state["INTEGRATE_WS_SESSION_KEY"] = ws_session_key
 
 def ensure_active_session():
-    """
-    Use this in your feature modules:
-        conn = ensure_active_session()
-        if not conn: return
-        io = IntegrateOrders(conn)
-    """
     required_keys = ["INTEGRATE_UID", "INTEGRATE_ACTID", "INTEGRATE_API_SESSION_KEY", "INTEGRATE_WS_SESSION_KEY"]
     if not all(k in st.session_state for k in required_keys):
         st.warning("You are not logged in! Please login with OTP from the sidebar.")
