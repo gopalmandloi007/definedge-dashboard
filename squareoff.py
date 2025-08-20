@@ -1,6 +1,17 @@
 import streamlit as st
 from utils import integrate_get, integrate_post
 
+def extract_qty(pos):
+    """Extracts net quantity using all common possible keys, returns signed int."""
+    for k in ['netqty', 'net_quantity', 'net_qty', 'quantity', 'Qty']:
+        v = pos.get(k)
+        if v is not None:
+            try:
+                return int(float(v))
+            except Exception:
+                continue
+    return 0
+
 def squareoff_form(item, qty, ts_info, is_position=False):
     label = "Position" if is_position else "Holding"
     unique_id = f"{label}_{ts_info['tradingsymbol']}"
@@ -30,8 +41,24 @@ def squareoff_form(item, qty, ts_info, is_position=False):
         key=f"pricetype_{unique_id}"
     )
 
+    # Choose price key for limit order
+    if is_position:
+        default_price = float(
+            item.get("buy_avg_price")
+            or item.get("avg_buy_price")
+            or item.get("net_averageprice")
+            or item.get("average_price")
+            or 0
+        )
+    else:
+        default_price = float(
+            item.get("avg_buy_price")
+            or item.get("average_price")
+            or item.get("buy_avg_price")
+            or 0
+        )
+
     if price_option == "Limit Order":
-        default_price = float(item.get("avg_buy_price") or item.get("average_price") or item.get("buy_avg_price") or 0)
         squareoff_price = st.number_input(
             "Limit Price (₹)", min_value=0.01, value=round(default_price, 2), key=f"price_{unique_id}"
         )
@@ -77,6 +104,7 @@ def squareoff_form(item, qty, ts_info, is_position=False):
             else:
                 st.success(f"Order Response: {status}")
             st.session_state["sq_id"] = None  # Only reset after submit
+            st.session_state["sqp_id"] = None
             st.rerun()
 
 def show():
@@ -113,6 +141,7 @@ def show():
                 columns[i].write(val)
             if columns[-1].button("Square Off", key=f"squareoff_btn_{ts_info['tradingsymbol']}"):
                 st.session_state["sq_id"] = f"HOLD_{idx}"
+                st.session_state["sqp_id"] = None
                 st.rerun()
             if sq_id == f"HOLD_{idx}":
                 squareoff_form(holding, qty, ts_info, is_position=False)
@@ -121,7 +150,8 @@ def show():
     # --- Positions Table ---
     st.header("📝 Positions")
     pdata = integrate_get("/positions")
-    positions = pdata.get("data", [])
+    # Try both 'positions' and 'data' keys for maximum compatibility
+    positions = pdata.get("positions") or pdata.get("data") or []
     pos_cols = ["tradingsymbol", "exchange", "product_type", "quantity", "buy_avg_price", "sell_avg_price", "net_qty", "pnl"]
     pos_labels = ["Symbol", "Exch", "Product", "Qty", "Buy Avg", "Sell Avg", "Net Qty", "PnL"]
     st.markdown("#### Positions List")
@@ -132,7 +162,7 @@ def show():
 
     user_positions = []
     for p in positions:
-        qty = int(float(p.get("net_qty", p.get("quantity", 0))))
+        qty = extract_qty(p)
         if qty != 0:
             user_positions.append(p)
     if not user_positions:
@@ -143,8 +173,9 @@ def show():
             columns = st.columns([1.5, 1.2, 1.2, 1, 1.2, 1.2, 1, 1.3, 1.2])
             for i, key in enumerate(pos_cols):
                 columns[i].write(pos.get(key, ""))
-            if columns[-1].button("Square Off", key=f"squareoff_btn_pos_{pos['tradingsymbol']}_{idx}"):
+            if columns[-1].button("Square Off", key=f"squareoff_btn_pos_{pos.get('tradingsymbol','')}_{idx}"):
                 st.session_state["sqp_id"] = f"POS_{idx}"
+                st.session_state["sq_id"] = None
                 st.rerun()
             if sqp_id == f"POS_{idx}":
                 ts_info = {
@@ -152,7 +183,7 @@ def show():
                     "exchange": pos.get("exchange"),
                     "isin": pos.get("isin", ""),
                 }
-                qty = abs(int(float(pos.get("net_qty", pos.get("quantity", 0)))))
+                qty = abs(extract_qty(pos))
                 squareoff_form(pos, qty, ts_info, is_position=True)
                 # ❌ DO NOT reset st.session_state["sqp_id"] here!
 
