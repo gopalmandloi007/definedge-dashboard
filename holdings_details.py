@@ -11,7 +11,6 @@ from utils import integrate_get
 
 @st.cache_data
 def load_master():
-    # Supports both 14 and 15 column master.csv automatically
     df = pd.read_csv("master.csv", sep="\t", header=None)
     if df.shape[1] == 15:
         df.columns = [
@@ -20,7 +19,7 @@ def load_master():
             "isin", "unknown7", "company"
         ]
         return df[["segment", "token", "symbol", "symbol_series", "series"]]
-    else:  # legacy 14-column
+    else:
         df.columns = [
             "segment", "token", "symbol", "instrument", "series", "isin1",
             "facevalue", "lot", "something", "zero1", "two1", "one1", "isin", "one2"
@@ -30,11 +29,9 @@ def load_master():
 def get_token(symbol, segment, master_df):
     symbol = str(symbol).strip().upper()
     segment = str(segment).strip().upper()
-    # Try symbol
     row = master_df[(master_df['symbol'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
     if not row.empty:
         return row.iloc[0]['token']
-    # Try symbol_series (for 15-col), or instrument (for 14-col)
     if "symbol_series" in master_df.columns:
         row2 = master_df[(master_df['symbol_series'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
         if not row2.empty:
@@ -54,7 +51,10 @@ def get_ltp(exchange, token, api_session_key):
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
             ltp = resp.json().get("ltp", None)
-            return float(ltp) if ltp is not None else None
+            try:
+                return float(ltp) if ltp is not None else None
+            except Exception:
+                return None
     except Exception:
         pass
     return None
@@ -77,11 +77,17 @@ def get_prev_close(exchange, token, api_session_key):
             rows = resp.text.strip().split("\n")
             if len(rows) >= 2:
                 prev_row = rows[-2]
-                prev_close = float(prev_row.split(",")[4])
-                return prev_close
+                try:
+                    prev_close = float(prev_row.split(",")[4])
+                    return prev_close
+                except Exception:
+                    return None
             elif len(rows) == 1:
-                prev_close = float(rows[0].split(",")[4])
-                return prev_close
+                try:
+                    prev_close = float(rows[0].split(",")[4])
+                    return prev_close
+                except Exception:
+                    return None
     except Exception:
         pass
     return None
@@ -274,16 +280,22 @@ def show():
 
         isin = h.get("isin", "")
         product = h.get("product", "")
-        qty = float(h.get("dp_qty", 0) or 0)
-        entry = float(h.get("avg_buy_price", 0) or 0)
+        try:
+            qty = float(h.get("dp_qty", 0) or 0)
+        except Exception:
+            qty = 0.0
+        try:
+            entry = float(h.get("avg_buy_price", 0) or 0)
+        except Exception:
+            entry = 0.0
         invested = entry * qty
 
         token = get_token(tsym, segment, master_df)
         ltp = get_ltp(exch, token, api_session_key) if token else None
-        if not ltp or ltp == 0:
+        if not (isinstance(ltp, (int, float)) and ltp > 0):
             ltp = get_prev_close(exch, token, api_session_key) if token else None
 
-        if ltp and ltp > 0:
+        if isinstance(ltp, (int, float)) and ltp > 0:
             current_value = ltp * qty
             pnl = current_value - invested
         else:
@@ -293,7 +305,7 @@ def show():
         initial_sl = round(entry * 0.97, 2)
         status = "Initial SL"
         trailing_sl = initial_sl
-        if ltp and ltp > 0:
+        if isinstance(ltp, (int, float)) and ltp > 0 and entry > 0:
             change_pct = 100 * (ltp - entry) / entry if entry else 0
             if change_pct >= 30:
                 trailing_sl = round(entry * 1.20, 2)
@@ -318,7 +330,7 @@ def show():
             "Qty": qty,
             "Entry": entry,
             "Invested": invested,
-            "Current Price": ltp if ltp else "",
+            "Current Price": ltp if isinstance(ltp, (int, float)) and ltp > 0 else "",
             "Current Value": current_value,
             "P&L": pnl,
             "Change %": round(change_pct, 2) if change_pct != "" else "",
@@ -558,7 +570,6 @@ def show():
                     col5.metric("Exhaustion Gap", "Yes" if signals['exhaustion_gap'] else "No")
                     col6.metric("Volume Reversal", "Yes" if signals['high_volume_reversal'] else "No")
                     
-                    # NEW: High vs EMA20 metric
                     latest = chart_df.iloc[-1]
                     ema20 = latest['EMA20']
                     high = latest['High']
