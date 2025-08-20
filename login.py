@@ -1,6 +1,11 @@
 import streamlit as st
 from integrate import ConnectToIntegrate
-import pyotp
+
+# Optional: For automatic TOTP if you have the TOTP secret
+try:
+    import pyotp
+except ImportError:
+    pyotp = None
 
 def update_session_state(uid, actid, api_session_key, ws_session_key):
     st.session_state["INTEGRATE_UID"] = uid
@@ -17,10 +22,10 @@ def show():
         st.error("Please set your API token and secret in Streamlit secrets.")
         return
 
-    # Check if TOTP secret is available for auto OTP
+    # Check if TOTP (auto OTP) is available
     auto_otp = False
     otp_value = None
-    if "integrate_totp_secret" in st.secrets:
+    if "integrate_totp_secret" in st.secrets and pyotp is not None:
         auto_otp = True
         otp_value = pyotp.TOTP(st.secrets["integrate_totp_secret"]).now()
 
@@ -35,13 +40,16 @@ def show():
         st.caption(f"Actid: {str(st.session_state.get('INTEGRATE_ACTID',''))}")
 
         with st.expander("Force Refresh Session (OTP required)"):
-            otp = otp_value if auto_otp else st.text_input("Enter OTP (from app/SMS)", type="password", key="refresh_otp")
+            if auto_otp:
+                otp = otp_value
+                st.info(f"Auto OTP generated: {otp}")
+            else:
+                otp = st.text_input("Enter OTP (from app/SMS)", type="password", key="refresh_otp")
             if st.button("Refresh Session"):
                 if otp:
                     conn = ConnectToIntegrate()
                     try:
                         conn.login(api_token=api_token, api_secret=api_secret, totp=otp)
-                        # Get session info from attributes, not method
                         uid = getattr(conn, "uid", None)
                         actid = getattr(conn, "actid", None)
                         api_session_key = getattr(conn, "api_session_key", None)
@@ -54,7 +62,11 @@ def show():
                     st.error("Please enter the OTP.")
     else:
         st.warning("No active session found. Please login with OTP.")
-        otp = otp_value if auto_otp else st.text_input("Enter OTP (from app/SMS)", type="password", key="login_otp")
+        if auto_otp:
+            otp = otp_value
+            st.info(f"Auto OTP generated: {otp}")
+        else:
+            otp = st.text_input("Enter OTP (from app/SMS)", type="password", key="login_otp")
         if st.button("Login"):
             if otp:
                 conn = ConnectToIntegrate()
