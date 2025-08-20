@@ -121,8 +121,6 @@ def show():
     data = integrate_get("/holdings")
     holdings = data.get("data", [])
 
-    st.write("DEBUG: holdings (raw)", holdings)
-
     hold_cols = ["tradingsymbol", "exchange", "isin", "dp_qty", "t1_qty", "avg_buy_price", "haircut"]
     col_labels = ["Symbol", "Exch", "ISIN", "DP Qty", "T1 Qty", "Avg Price", "Haircut"]
     st.markdown("#### Holdings List")
@@ -158,8 +156,6 @@ def show():
     st.header("📝 Positions")
     pdata = integrate_get("/positions")
     positions = pdata.get("positions") or pdata.get("data") or []
-
-    st.write("DEBUG: positions (raw)", positions)
 
     col_labels = ["Symbol", "Exch", "Product", "Qty", "Buy Avg", "Sell Avg", "Net Qty", "PnL"]
     st.markdown("#### Positions List")
