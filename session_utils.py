@@ -10,11 +10,9 @@ def update_session_state(uid, actid, api_session_key, ws_session_key):
 def ensure_active_session():
     """
     Use this in your feature modules:
-    Usage:
         conn = ensure_active_session()
         if not conn: return
         io = IntegrateOrders(conn)
-        # ...use io...
     """
     required_keys = ["INTEGRATE_UID", "INTEGRATE_ACTID", "INTEGRATE_API_SESSION_KEY", "INTEGRATE_WS_SESSION_KEY"]
     if not all(k in st.session_state for k in required_keys):
@@ -31,7 +29,6 @@ def ensure_active_session():
     try:
         io = IntegrateOrders(conn)
         test = io.holdings()
-        # Session expired check
         if (
             isinstance(test, dict)
             and str(test.get("status", "")).upper() in ["FAILED", "FAIL", "ERROR"]
