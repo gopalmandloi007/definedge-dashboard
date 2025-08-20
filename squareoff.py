@@ -47,16 +47,16 @@ def squareoff_form(item, qty, ts_info, is_position=False):
         key=f"pricetype_{unique_id}"
     )
 
-    # Choose price key for limit order
+    # Correct default price for limit orders
     if is_position:
         net_qty = extract_qty(item)
         if net_qty > 0:
             default_price = float(
-                extract_first_valid(item, ["day_buy_avg", "total_buy_avg", "net_averageprice", "average_price"], 0)
+                extract_first_valid(item, ["day_buy_avg", "total_buy_avg"], 0)
             )
         else:
             default_price = float(
-                extract_first_valid(item, ["day_sell_avg", "total_sell_avg", "net_averageprice", "average_price"], 0)
+                extract_first_valid(item, ["day_sell_avg", "total_sell_avg"], 0)
             )
     else:
         default_price = float(
@@ -182,11 +182,11 @@ def show():
             net_qty = extract_qty(pos)
             # Show correct Buy Avg / Sell Avg based on position side
             if net_qty > 0:
-                buy_avg = extract_first_valid(pos, ["day_buy_avg", "total_buy_avg", "net_averageprice", "average_price"], "-")
+                buy_avg = extract_first_valid(pos, ["day_buy_avg", "total_buy_avg"], "-")
                 sell_avg = "-"
             elif net_qty < 0:
                 buy_avg = "-"
-                sell_avg = extract_first_valid(pos, ["day_sell_avg", "total_sell_avg", "net_averageprice", "average_price"], "-")
+                sell_avg = extract_first_valid(pos, ["day_sell_avg", "total_sell_avg"], "-")
             else:
                 buy_avg = "-"
                 sell_avg = "-"
