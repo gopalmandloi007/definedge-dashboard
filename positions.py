@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from utils import integrate_get
 
-def show_positions():
+def show():
     st.header("=========== Positions Dashboard Pro ===========")
 
     # Fetch positions data
@@ -80,6 +80,3 @@ def show_positions():
 
     df = pd.DataFrame(table, columns=headers)
     st.dataframe(df, use_container_width=True)
-
-if __name__ == "__main__":
-    show_positions()
