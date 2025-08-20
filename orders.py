@@ -131,24 +131,38 @@ def show():
         st.markdown('</div>', unsafe_allow_html=True)
 
     if st.button("Place Order", use_container_width=True, type="primary"):
+        # --- FIX: Set price_type & trigger_price logic for correct order ---
         data = {
-            "tradingsymbol": tradingsymbol,  # Now includes series, e.g. RELIANCE-EQ
+            "tradingsymbol": tradingsymbol,
             "exchange": exchange,
             "order_type": order_type,
             "quantity": int(qty),
-            "price_type": price_type,
-            "price": float(price),
             "product_type": product_type,
             "validity": validity
         }
-        if trigger_price:
+        # Apply correct fields for order type
+        if price_type == "MARKET":
+            data["price_type"] = "MARKET"
+            data["price"] = 0.0
+        elif price_type == "LIMIT":
+            data["price_type"] = "LIMIT"
+            data["price"] = float(price)
+        elif price_type == "SL-LIMIT":
+            data["price_type"] = "SL-LIMIT"
+            data["price"] = float(price)
             data["trigger_price"] = float(trigger_price)
+        elif price_type == "SL-MARKET":
+            data["price_type"] = "SL-MARKET"
+            data["price"] = 0.0
+            data["trigger_price"] = float(trigger_price)
+        # Add optional fields
         if remarks:
             data["remarks"] = remarks
         if disclosed_quantity:
             data["disclosed_quantity"] = int(disclosed_quantity)
         if amo:
             data["amo"] = "Yes"
+
         resp = integrate_post("/placeorder", data)
         st.success("Order submitted!")
         st.json(resp)
