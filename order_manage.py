@@ -8,8 +8,16 @@ def show():
     # Fetch orders
     data = integrate_get("/orders")
     orderlist = data.get("orders", [])
-    open_statuses = {"OPEN", "PARTIALLY FILLED", "PARTIALLY_FILLED"}
-    open_orders = [o for o in orderlist if o.get("order_status", "").upper() in open_statuses]
+
+    # Print for debugging (optional, can comment out)
+    # st.write("Order Statuses:", [o.get("order_status", "") for o in orderlist])
+
+    # Normalize statuses: replace spaces with underscores and uppercase
+    open_statuses = {"OPEN", "PARTIALLY_FILLED"}
+    def norm_status(s):
+        return str(s).replace(" ", "_").upper()
+
+    open_orders = [o for o in orderlist if norm_status(o.get("order_status", "")) in open_statuses]
 
     if not open_orders:
         st.info("No open/partial orders found.")
