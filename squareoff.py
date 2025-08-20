@@ -1,11 +1,19 @@
 import streamlit as st
 from utils import integrate_get, integrate_post
 
+def extract_first_valid(d, keys, default=""):
+    """Return first found non-blank value from d for the given keys."""
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, "", [], {}, "null"):
+            return v
+    return default
+
 def extract_qty(pos):
     """Extracts net quantity using all common possible keys, returns signed int."""
     for k in ['netqty', 'net_quantity', 'net_qty', 'quantity', 'Qty']:
         v = pos.get(k)
-        if v is not None:
+        if v is not None and v != "":
             try:
                 return int(float(v))
             except Exception:
@@ -44,18 +52,11 @@ def squareoff_form(item, qty, ts_info, is_position=False):
     # Choose price key for limit order
     if is_position:
         default_price = float(
-            item.get("buy_avg_price")
-            or item.get("avg_buy_price")
-            or item.get("net_averageprice")
-            or item.get("average_price")
-            or 0
+            extract_first_valid(item, ["buy_avg_price", "avg_buy_price", "net_averageprice", "average_price"], 0)
         )
     else:
         default_price = float(
-            item.get("avg_buy_price")
-            or item.get("average_price")
-            or item.get("buy_avg_price")
-            or 0
+            extract_first_valid(item, ["avg_buy_price", "average_price", "buy_avg_price"], 0)
         )
 
     if price_option == "Limit Order":
@@ -103,7 +104,7 @@ def squareoff_form(item, qty, ts_info, is_position=False):
                 st.error(f"Order Failed: {resp.get('message','Error')}")
             else:
                 st.success(f"Order Response: {status}")
-            st.session_state["sq_id"] = None  # Only reset after submit
+            st.session_state["sq_id"] = None
             st.session_state["sqp_id"] = None
             st.rerun()
 
@@ -115,6 +116,10 @@ def show():
     st.header("📦 Holdings")
     data = integrate_get("/holdings")
     holdings = data.get("data", [])
+
+    # Debug: See raw holdings structure
+    st.write("DEBUG: holdings (raw)", holdings)
+
     hold_cols = ["tradingsymbol", "exchange", "isin", "dp_qty", "t1_qty", "avg_buy_price", "haircut"]
     col_labels = ["Symbol", "Exch", "ISIN", "DP Qty", "T1 Qty", "Avg Price", "Haircut"]
     st.markdown("#### Holdings List")
@@ -125,7 +130,7 @@ def show():
 
     user_holdings = []
     for h in holdings:
-        qty = int(float(h.get("dp_qty", 0)))
+        qty = int(float(h.get("dp_qty", 0) or 0))
         tradingsymbols = h.get("tradingsymbol", [])
         if qty > 0 and tradingsymbols and isinstance(tradingsymbols, list):
             user_holdings.append((h, qty, tradingsymbols))
@@ -145,18 +150,32 @@ def show():
                 st.rerun()
             if sq_id == f"HOLD_{idx}":
                 squareoff_form(holding, qty, ts_info, is_position=False)
-                # ❌ DO NOT reset st.session_state["sq_id"] here!
 
     # --- Positions Table ---
     st.header("📝 Positions")
     pdata = integrate_get("/positions")
-    # Try both 'positions' and 'data' keys for maximum compatibility
+    # Try both 'positions' and 'data' keys for compatibility
     positions = pdata.get("positions") or pdata.get("data") or []
-    pos_cols = ["tradingsymbol", "exchange", "product_type", "quantity", "buy_avg_price", "sell_avg_price", "net_qty", "pnl"]
-    pos_labels = ["Symbol", "Exch", "Product", "Qty", "Buy Avg", "Sell Avg", "Net Qty", "PnL"]
+
+    # Debug: See raw positions structure
+    st.write("DEBUG: positions (raw)", positions)
+
+    # Columns mapping (check all possible key aliases)
+    pos_cols = [
+        (["tradingsymbol", "symbol"], "Symbol"),
+        (["exchange"], "Exch"),
+        (["product_type", "productType", "Product"], "Product"),
+        (["quantity", "net_quantity", "netqty", "Qty", "net_qty"], "Qty"),
+        (["buy_avg_price", "avg_buy_price", "net_averageprice", "average_price"], "Buy Avg"),
+        (["sell_avg_price", "avg_sell_price"], "Sell Avg"),
+        (["net_qty", "net_quantity", "Qty", "quantity"], "Net Qty"),
+        (["pnl", "unrealized_pnl", "Unrealised P&L"], "PnL"),
+    ]
+
+    col_labels = [label for _, label in pos_cols]
     st.markdown("#### Positions List")
     columns = st.columns([1.5, 1.2, 1.2, 1, 1.2, 1.2, 1, 1.3, 1.2])
-    for i, label in enumerate(pos_labels):
+    for i, label in enumerate(col_labels):
         columns[i].markdown(f"**{label}**")
     columns[-1].markdown("**Square Off**")
 
@@ -165,27 +184,27 @@ def show():
         qty = extract_qty(p)
         if qty != 0:
             user_positions.append(p)
+    sqp_id = st.session_state.get("sqp_id", None)
     if not user_positions:
         st.info("No open positions to square off.")
     else:
-        sqp_id = st.session_state.get("sqp_id", None)
         for idx, pos in enumerate(user_positions):
             columns = st.columns([1.5, 1.2, 1.2, 1, 1.2, 1.2, 1, 1.3, 1.2])
-            for i, key in enumerate(pos_cols):
-                columns[i].write(pos.get(key, ""))
-            if columns[-1].button("Square Off", key=f"squareoff_btn_pos_{pos.get('tradingsymbol','')}_{idx}"):
+            for i, (aliases, _) in enumerate(pos_cols):
+                val = extract_first_valid(pos, aliases, "-")
+                columns[i].write(val)
+            if columns[-1].button("Square Off", key=f"squareoff_btn_pos_{extract_first_valid(pos,['tradingsymbol','symbol'],'')}_{idx}"):
                 st.session_state["sqp_id"] = f"POS_{idx}"
                 st.session_state["sq_id"] = None
                 st.rerun()
             if sqp_id == f"POS_{idx}":
                 ts_info = {
-                    "tradingsymbol": pos.get("tradingsymbol"),
-                    "exchange": pos.get("exchange"),
-                    "isin": pos.get("isin", ""),
+                    "tradingsymbol": extract_first_valid(pos, ["tradingsymbol","symbol"]),
+                    "exchange": extract_first_valid(pos, ["exchange"]),
+                    "isin": extract_first_valid(pos, ["isin"], ""),
                 }
                 qty = abs(extract_qty(pos))
                 squareoff_form(pos, qty, ts_info, is_position=True)
-                # ❌ DO NOT reset st.session_state["sqp_id"] here!
 
 if __name__ == "__main__":
     show()
