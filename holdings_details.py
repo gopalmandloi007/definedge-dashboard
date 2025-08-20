@@ -9,6 +9,12 @@ import numpy as np
 import io
 from utils import integrate_get
 
+def is_number(val):
+    try:
+        return isinstance(val, (int, float)) and not isinstance(val, bool)
+    except Exception:
+        return False
+
 @st.cache_data
 def load_master():
     df = pd.read_csv("master.csv", sep="\t", header=None)
@@ -227,7 +233,7 @@ def open_risk_status(open_risk):
         return "At Risk"
 
 def minervini_high_vs_ema20_interpretation(high, ema20):
-    if ema20 == 0 or pd.isnull(high) or pd.isnull(ema20):
+    if not is_number(ema20) or ema20 == 0 or pd.isnull(high) or pd.isnull(ema20):
         return "", ""
     diff_pct = ((high - ema20) / ema20) * 100
     diff_pct_rounded = round(diff_pct, 2)
@@ -292,10 +298,10 @@ def show():
 
         token = get_token(tsym, segment, master_df)
         ltp = get_ltp(exch, token, api_session_key) if token else None
-        if not (isinstance(ltp, (int, float)) and ltp > 0):
+        if not (is_number(ltp) and ltp > 0):
             ltp = get_prev_close(exch, token, api_session_key) if token else None
 
-        if isinstance(ltp, (int, float)) and ltp > 0:
+        if is_number(ltp) and ltp > 0:
             current_value = ltp * qty
             pnl = current_value - invested
         else:
@@ -305,7 +311,7 @@ def show():
         initial_sl = round(entry * 0.97, 2)
         status = "Initial SL"
         trailing_sl = initial_sl
-        if isinstance(ltp, (int, float)) and ltp > 0 and entry > 0:
+        if is_number(ltp) and ltp > 0 and is_number(entry) and entry > 0:
             change_pct = 100 * (ltp - entry) / entry if entry else 0
             if change_pct >= 30:
                 trailing_sl = round(entry * 1.20, 2)
@@ -330,7 +336,7 @@ def show():
             "Qty": qty,
             "Entry": entry,
             "Invested": invested,
-            "Current Price": ltp if isinstance(ltp, (int, float)) and ltp > 0 else "",
+            "Current Price": ltp if is_number(ltp) and ltp > 0 else "",
             "Current Value": current_value,
             "P&L": pnl,
             "Change %": round(change_pct, 2) if change_pct != "" else "",
