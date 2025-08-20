@@ -10,14 +10,12 @@ def update_session_state(uid, actid, api_session_key, ws_session_key):
 def show():
     st.header("Login (OTP Required)")
     try:
-        creds = st.secrets["integrate"]
-        api_token = creds["api_token"]
-        api_secret = creds["api_secret"]
+        api_token = st.secrets["integrate_api_token"]
+        api_secret = st.secrets["integrate_api_secret"]
     except Exception:
         st.error("Please set your API token and secret in Streamlit secrets.")
         return
 
-    # If session already exists, show info and force refresh option
     session_exists = all(
         k in st.session_state for k in [
             "INTEGRATE_UID", "INTEGRATE_ACTID", "INTEGRATE_API_SESSION_KEY", "INTEGRATE_WS_SESSION_KEY"
