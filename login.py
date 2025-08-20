@@ -1,17 +1,23 @@
 import streamlit as st
 from integrate import ConnectToIntegrate
 
-# Optional: For automatic TOTP if you have the TOTP secret
 try:
     import pyotp
 except ImportError:
     pyotp = None
 
-def update_session_state(uid, actid, api_session_key, ws_session_key):
+def update_session_state_and_secrets(uid, actid, api_session_key, ws_session_key):
+    # Update session state (for Streamlit runtime)
     st.session_state["INTEGRATE_UID"] = uid
     st.session_state["INTEGRATE_ACTID"] = actid
     st.session_state["INTEGRATE_API_SESSION_KEY"] = api_session_key
     st.session_state["INTEGRATE_WS_SESSION_KEY"] = ws_session_key
+
+    # Monkey-patch st.secrets for runtime so all code sees new keys
+    st.secrets["integrate_uid"] = uid
+    st.secrets["integrate_actid"] = actid
+    st.secrets["integrate_api_session_key"] = api_session_key
+    st.secrets["integrate_ws_session_key"] = ws_session_key
 
 def show():
     st.header("Login (OTP Required)")
@@ -22,7 +28,7 @@ def show():
         st.error("Please set your API token and secret in Streamlit secrets.")
         return
 
-    # Check if TOTP (auto OTP) is available
+    # TOTP support (auto OTP if secret present)
     auto_otp = False
     otp_value = None
     if "integrate_totp_secret" in st.secrets and pyotp is not None:
@@ -54,7 +60,7 @@ def show():
                         actid = getattr(conn, "actid", None)
                         api_session_key = getattr(conn, "api_session_key", None)
                         ws_session_key = getattr(conn, "ws_session_key", None)
-                        update_session_state(uid, actid, api_session_key, ws_session_key)
+                        update_session_state_and_secrets(uid, actid, api_session_key, ws_session_key)
                         st.success("Session forcibly refreshed!")
                     except Exception as e:
                         st.error(f"Login failed: {e}")
@@ -76,7 +82,7 @@ def show():
                     actid = getattr(conn, "actid", None)
                     api_session_key = getattr(conn, "api_session_key", None)
                     ws_session_key = getattr(conn, "ws_session_key", None)
-                    update_session_state(uid, actid, api_session_key, ws_session_key)
+                    update_session_state_and_secrets(uid, actid, api_session_key, ws_session_key)
                     st.success("Session created successfully!")
                 except Exception as e:
                     st.error(f"Login failed: {e}")
