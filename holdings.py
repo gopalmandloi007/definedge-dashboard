@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from utils import integrate_get
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import io
@@ -12,7 +11,6 @@ import numpy as np
 # ========== Enhanced Chart Utils ==========
 @st.cache_data
 def load_master():
-    # Supports both 14 and 15 column master.csv automatically
     df = pd.read_csv("master.csv", sep="\t", header=None)
     if df.shape[1] == 15:
         df.columns = [
@@ -31,11 +29,9 @@ def load_master():
 def get_token(symbol, segment, master_df):
     symbol = symbol.strip().upper()
     segment = segment.strip().upper()
-    # Try symbol
     row = master_df[(master_df['symbol'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
     if not row.empty:
         return row.iloc[0]['token']
-    # Try symbol_series (for indices in 15-col), or instrument (for 14-col file)
     if "symbol_series" in master_df.columns:
         row2 = master_df[(master_df['symbol_series'].str.upper() == symbol) & (master_df['segment'].str.upper() == segment)]
         if not row2.empty:
@@ -88,6 +84,19 @@ def compute_macd(data, slow=26, fast=12, signal=9):
     macd = ema_fast - ema_slow
     signal_line = macd.ewm(span=signal, adjust=False).mean()
     return macd, signal_line
+
+def compute_relative_strength(stock_df, index_df):
+    merged = pd.merge(
+        stock_df[["Date", "Close"]],
+        index_df[["Date", "Close"]].rename(columns={"Close": "IndexClose"}),
+        on="Date",
+        how="inner"
+    ).dropna()
+    if len(merged) < 10:
+        return pd.Series(dtype="float64")
+    rs_series = merged["Close"] / merged["IndexClose"]
+    rs_series.index = merged["Date"]
+    return rs_series
 
 def safe_float(val):
     try:
@@ -237,7 +246,6 @@ def minervini_sell_signals(df, lookback_days=15):
 def show():
     st.header("📊 Holdings Intelligence Dashboard")
     st.caption("Actionable insights for portfolio decisions - Hold, Add, Reduce, or Exit")
-
     api_session_key = st.secrets.get("integrate_api_session_key", "")
     auto_refresh = st.checkbox("Auto-refresh every 30 seconds", value=False)
     master_df = load_master()
@@ -336,8 +344,10 @@ def show():
         col4.metric("Holdings", len(df))
         col1, col2 = st.columns(2)
         with col1:
-            fig = px.pie(df, names="Symbol", values="Current", 
-                         title="Portfolio Allocation", hole=0.3)
+            fig = go.Figure(
+                data=[go.Pie(labels=df["Symbol"], values=df["Current"], hole=0.3, name="Portfolio Allocation")],
+                layout=go.Layout(title="Portfolio Allocation")
+            )
             st.plotly_chart(fig, use_container_width=True)
         with col2:
             risk_df = df.copy()
@@ -345,9 +355,11 @@ def show():
                 risk_df['%Chg Avg'] < -10, 3, 
                 np.where(risk_df['Portfolio %'] > 10, 2, 1)
             )
-            fig = px.bar(risk_df, x='Symbol', y='Current', color='Risk Score',
-                         title="Risk Exposure (Size & Performance)",
-                         color_continuous_scale="RdYlGn_r")
+            fig = go.Figure(
+                data=[go.Bar(x=risk_df['Symbol'], y=risk_df['Current'], marker_color=risk_df['Risk Score'],
+                             name="Risk Exposure (Size & Performance)")],
+                layout=go.Layout(title="Risk Exposure (Size & Performance)")
+            )
             st.plotly_chart(fig, use_container_width=True)
         st.subheader("Holdings Analysis")
         def color_action(val):
@@ -378,6 +390,27 @@ def show():
                 show_rsi = st.checkbox("RSI Indicator", value=True)
                 show_macd = st.checkbox("MACD", value=True)
                 days_back = st.slider("Days to Show", 30, 365, 90)
+
+                st.markdown("### Relative Strength Settings")
+                rs_index_option = st.selectbox(
+                    "Relative Strength vs Index",
+                    ["Nifty 500", "Nifty 50"],
+                    index=0
+                )
+                # Identify index symbol and series
+                index_row = None
+                index_symbol = None
+                index_series = "IDX"
+                for idx, row in master_df.iterrows():
+                    sym = row["symbol"].strip().lower()
+                    if (rs_index_option == "Nifty 500" and sym == "nifty 500") or \
+                       (rs_index_option == "Nifty 50" and sym == "nifty 50"):
+                        index_row = row
+                        index_symbol = row["symbol"]
+                        if "series" in row and pd.notnull(row["series"]):
+                            index_series = row["series"]
+                        break
+
                 if token:
                     from_dt, to_dt = get_time_range(days_back)
                     try:
@@ -392,17 +425,33 @@ def show():
                             macd, signal = compute_macd(chart_df)
                             chart_df['MACD'] = macd
                             chart_df['Signal'] = signal
+
+                        # Fetch index candles for RS
+                        if index_row is not None:
+                            index_token = index_row["token"]
+                            index_segment = index_row["segment"]
+                            try:
+                                index_df = fetch_candles_definedge(index_segment, index_token, from_dt, to_dt, api_key=api_session_key)
+                            except Exception as e:
+                                st.warning(f"Error fetching {rs_index_option} candles: {e}")
+                                index_df = None
+                        else:
+                            index_df = None
+                            st.warning(f"{rs_index_option} not found in master file, RS will not be shown.")
+
+                        # Main Candlestick Chart (use xaxis.type="category" to remove gaps)
                         rows = 1
                         row_heights = [1.0]
                         specs = [[{"secondary_y": True}]]
                         if show_rsi and show_macd:
                             rows = 3
-                            row_heights = [0.6, 0.2, 0.2]
+                            row_heights = [0.45, 0.2, 0.2]
                             specs = [[{"secondary_y": True}], [{}], [{}]]
                         elif show_rsi or show_macd:
                             rows = 2
-                            row_heights = [0.7, 0.3]
+                            row_heights = [0.65, 0.25]
                             specs = [[{"secondary_y": True}], [{}]]
+
                         fig = make_subplots(
                             rows=rows, 
                             cols=1,
@@ -411,9 +460,11 @@ def show():
                             row_heights=row_heights,
                             specs=specs
                         )
+
+                        # Candlestick chart with moving averages
                         fig.add_trace(
                             go.Candlestick(
-                                x=chart_df["Date"],
+                                x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
                                 open=chart_df["Open"],
                                 high=chart_df["High"],
                                 low=chart_df["Low"],
@@ -425,7 +476,7 @@ def show():
                         if show_ema:
                             fig.add_trace(
                                 go.Scatter(
-                                    x=chart_df["Date"],
+                                    x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
                                     y=chart_df["EMA20"],
                                     mode="lines",
                                     name="20 EMA",
@@ -435,7 +486,7 @@ def show():
                             )
                             fig.add_trace(
                                 go.Scatter(
-                                    x=chart_df["Date"],
+                                    x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
                                     y=chart_df["EMA50"],
                                     mode="lines",
                                     name="50 EMA",
@@ -443,11 +494,12 @@ def show():
                                 ),
                                 row=1, col=1
                             )
+                        # RSI
                         if show_rsi:
                             rsi_row = 2 if not show_macd else 2
                             fig.add_trace(
                                 go.Scatter(
-                                    x=chart_df["Date"],
+                                    x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
                                     y=chart_df["RSI"],
                                     mode="lines",
                                     name="RSI",
@@ -463,11 +515,12 @@ def show():
                                 y=70, line_dash="dash", line_color="red",
                                 row=rsi_row, col=1
                             )
+                        # MACD
                         if show_macd:
                             macd_row = 2 if not show_rsi else 3
                             fig.add_trace(
                                 go.Bar(
-                                    x=chart_df["Date"],
+                                    x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
                                     y=chart_df["MACD"],
                                     name="MACD",
                                     marker_color=np.where(chart_df['MACD'] > 0, 'green', 'red')
@@ -476,7 +529,7 @@ def show():
                             )
                             fig.add_trace(
                                 go.Scatter(
-                                    x=chart_df["Date"],
+                                    x=chart_df["Date"].dt.strftime("%Y-%m-%d"),
                                     y=chart_df["Signal"],
                                     mode="lines",
                                     name="Signal",
@@ -488,9 +541,39 @@ def show():
                             height=600,
                             title=f"{selected_symbol} Technical Analysis",
                             showlegend=True,
-                            xaxis_rangeslider_visible=False
+                            xaxis_rangeslider_visible=False,
+                            xaxis=dict(type="category"),  # REMOVE DATE GAPS!
+                            margin=dict(l=10, r=10, t=30, b=10)
                         )
+                        fig.update_xaxes(type="category")
+
+                        # Make chart full width (centered)
                         st.plotly_chart(fig, use_container_width=True)
+
+                        # Relative Strength Chart
+                        if index_df is not None and not index_df.empty:
+                            rs_series = compute_relative_strength(chart_df, index_df)
+                            if not rs_series.empty:
+                                st.markdown(f"### Relative Strength vs {rs_index_option}")
+                                rs_fig = go.Figure()
+                                rs_fig.add_trace(go.Scatter(
+                                    x=rs_series.index.strftime("%Y-%m-%d"),
+                                    y=rs_series,
+                                    mode="lines",
+                                    name="RS"
+                                ))
+                                rs_fig.update_layout(
+                                    height=250,
+                                    margin=dict(l=10, r=10, t=30, b=10),
+                                    title=f"Relative Strength: {selected_symbol} / {rs_index_option}",
+                                    xaxis=dict(type="category")
+                                )
+                                st.plotly_chart(rs_fig, use_container_width=True)
+                            else:
+                                st.info("Not enough data to plot Relative Strength.")
+                        else:
+                            st.info("Index data not available for Relative Strength.")
+
                         last_row = chart_df.iloc[-1]
                         insights = []
                         if show_ema:
