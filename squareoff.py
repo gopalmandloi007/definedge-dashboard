@@ -2,7 +2,6 @@ import streamlit as st
 from utils import integrate_get, integrate_post
 
 def extract_first_valid(d, keys, default=""):
-    """Return first found non-blank value from d for the given keys."""
     for k in keys:
         v = d.get(k)
         if v not in (None, "", [], {}, "null"):
@@ -10,7 +9,6 @@ def extract_first_valid(d, keys, default=""):
     return default
 
 def extract_qty(pos):
-    """Extracts net quantity using all common possible keys, returns signed int."""
     for k in ['netqty', 'net_quantity', 'net_qty', 'quantity', 'Qty']:
         v = pos.get(k)
         if v is not None and v != "":
@@ -51,9 +49,15 @@ def squareoff_form(item, qty, ts_info, is_position=False):
 
     # Choose price key for limit order
     if is_position:
-        default_price = float(
-            extract_first_valid(item, ["buy_avg_price", "avg_buy_price", "net_averageprice", "average_price"], 0)
-        )
+        net_qty = extract_qty(item)
+        if net_qty > 0:
+            default_price = float(
+                extract_first_valid(item, ["day_buy_avg", "total_buy_avg", "net_averageprice", "average_price"], 0)
+            )
+        else:
+            default_price = float(
+                extract_first_valid(item, ["day_sell_avg", "total_sell_avg", "net_averageprice", "average_price"], 0)
+            )
     else:
         default_price = float(
             extract_first_valid(item, ["avg_buy_price", "average_price", "buy_avg_price"], 0)
@@ -117,7 +121,6 @@ def show():
     data = integrate_get("/holdings")
     holdings = data.get("data", [])
 
-    # Debug: See raw holdings structure
     st.write("DEBUG: holdings (raw)", holdings)
 
     hold_cols = ["tradingsymbol", "exchange", "isin", "dp_qty", "t1_qty", "avg_buy_price", "haircut"]
@@ -154,25 +157,11 @@ def show():
     # --- Positions Table ---
     st.header("📝 Positions")
     pdata = integrate_get("/positions")
-    # Try both 'positions' and 'data' keys for compatibility
     positions = pdata.get("positions") or pdata.get("data") or []
 
-    # Debug: See raw positions structure
     st.write("DEBUG: positions (raw)", positions)
 
-    # Columns mapping (check all possible key aliases)
-    pos_cols = [
-        (["tradingsymbol", "symbol"], "Symbol"),
-        (["exchange"], "Exch"),
-        (["product_type", "productType", "Product"], "Product"),
-        (["quantity", "net_quantity", "netqty", "Qty", "net_qty"], "Qty"),
-        (["buy_avg_price", "avg_buy_price", "net_averageprice", "average_price"], "Buy Avg"),
-        (["sell_avg_price", "avg_sell_price"], "Sell Avg"),
-        (["net_qty", "net_quantity", "Qty", "quantity"], "Net Qty"),
-        (["pnl", "unrealized_pnl", "Unrealised P&L"], "PnL"),
-    ]
-
-    col_labels = [label for _, label in pos_cols]
+    col_labels = ["Symbol", "Exch", "Product", "Qty", "Buy Avg", "Sell Avg", "Net Qty", "PnL"]
     st.markdown("#### Positions List")
     columns = st.columns([1.5, 1.2, 1.2, 1, 1.2, 1.2, 1, 1.3, 1.2])
     for i, label in enumerate(col_labels):
@@ -190,8 +179,28 @@ def show():
     else:
         for idx, pos in enumerate(user_positions):
             columns = st.columns([1.5, 1.2, 1.2, 1, 1.2, 1.2, 1, 1.3, 1.2])
-            for i, (aliases, _) in enumerate(pos_cols):
-                val = extract_first_valid(pos, aliases, "-")
+            net_qty = extract_qty(pos)
+            # Show correct Buy Avg / Sell Avg based on position side
+            if net_qty > 0:
+                buy_avg = extract_first_valid(pos, ["day_buy_avg", "total_buy_avg", "net_averageprice", "average_price"], "-")
+                sell_avg = "-"
+            elif net_qty < 0:
+                buy_avg = "-"
+                sell_avg = extract_first_valid(pos, ["day_sell_avg", "total_sell_avg", "net_averageprice", "average_price"], "-")
+            else:
+                buy_avg = "-"
+                sell_avg = "-"
+            col_vals = [
+                extract_first_valid(pos, ["tradingsymbol", "symbol"], "-"),
+                extract_first_valid(pos, ["exchange"], "-"),
+                extract_first_valid(pos, ["product_type", "productType", "Product"], "-"),
+                str(net_qty),
+                buy_avg,
+                sell_avg,
+                str(net_qty),
+                extract_first_valid(pos, ["pnl", "unrealized_pnl", "Unrealised P&L"], "-"),
+            ]
+            for i, val in enumerate(col_vals):
                 columns[i].write(val)
             if columns[-1].button("Square Off", key=f"squareoff_btn_pos_{extract_first_valid(pos,['tradingsymbol','symbol'],'')}_{idx}"):
                 st.session_state["sqp_id"] = f"POS_{idx}"
