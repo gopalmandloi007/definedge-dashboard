@@ -1,20 +1,11 @@
 import streamlit as st
-import os
-from dotenv import load_dotenv, set_key
 from integrate import ConnectToIntegrate, IntegrateOrders
 
-dotenv_file = '.env'
-load_dotenv(dotenv_file)
-
-def update_env_session_keys(uid, actid, api_session_key, ws_session_key):
-    os.environ["INTEGRATE_UID"] = uid
-    os.environ["INTEGRATE_ACTID"] = actid
-    os.environ["INTEGRATE_API_SESSION_KEY"] = api_session_key
-    os.environ["INTEGRATE_WS_SESSION_KEY"] = ws_session_key
-    set_key(dotenv_file, "INTEGRATE_UID", uid)
-    set_key(dotenv_file, "INTEGRATE_ACTID", actid)
-    set_key(dotenv_file, "INTEGRATE_API_SESSION_KEY", api_session_key)
-    set_key(dotenv_file, "INTEGRATE_WS_SESSION_KEY", ws_session_key)
+def update_session_state(uid, actid, api_session_key, ws_session_key):
+    st.session_state["INTEGRATE_UID"] = uid
+    st.session_state["INTEGRATE_ACTID"] = actid
+    st.session_state["INTEGRATE_API_SESSION_KEY"] = api_session_key
+    st.session_state["INTEGRATE_WS_SESSION_KEY"] = ws_session_key
 
 def ensure_active_session(conn):
     try:
@@ -29,41 +20,49 @@ def ensure_active_session(conn):
             raise Exception("Session expired")
         return io
     except Exception:
-        api_token = os.environ["INTEGRATE_API_TOKEN"]
-        api_secret = os.environ["INTEGRATE_API_SECRET"]
+        creds = st.secrets["integrate"]
+        api_token = creds["api_token"]
+        api_secret = creds["api_secret"]
         conn.login(api_token=api_token, api_secret=api_secret)
         uid, actid, api_session_key, ws_session_key = conn.get_session_keys()
-        update_env_session_keys(uid, actid, api_session_key, ws_session_key)
+        update_session_state(uid, actid, api_session_key, ws_session_key)
         st.info("Session refreshed successfully.")
         return IntegrateOrders(conn)
 
 def show():
     st.header("Login & Session Key (SDK Mode)")
-    api_token = os.environ.get("INTEGRATE_API_TOKEN", "")
-    api_secret = os.environ.get("INTEGRATE_API_SECRET", "")
-    if not api_token or not api_secret:
-        st.error("Please set INTEGRATE_API_TOKEN and INTEGRATE_API_SECRET in your .env file.")
+    try:
+        creds = st.secrets["integrate"]
+        api_token = creds["api_token"]
+        api_secret = creds["api_secret"]
+    except Exception:
+        st.error("Please set your API token and secret in Streamlit secrets.")
         return
 
-    conn = ConnectToIntegrate()
-    try:
-        uid = os.environ["INTEGRATE_UID"]
-        actid = os.environ["INTEGRATE_ACTID"]
-        api_session_key = os.environ["INTEGRATE_API_SESSION_KEY"]
-        ws_session_key = os.environ["INTEGRATE_WS_SESSION_KEY"]
-        conn.set_session_keys(uid, actid, api_session_key, ws_session_key)
-    except KeyError:
-        st.warning("No previous session found. Logging in...")
+    # Try to restore previous session from session_state
+    if all(k in st.session_state for k in [
+        "INTEGRATE_UID", "INTEGRATE_ACTID", "INTEGRATE_API_SESSION_KEY", "INTEGRATE_WS_SESSION_KEY"
+    ]):
+        conn = ConnectToIntegrate()
+        conn.set_session_keys(
+            st.session_state["INTEGRATE_UID"],
+            st.session_state["INTEGRATE_ACTID"],
+            st.session_state["INTEGRATE_API_SESSION_KEY"],
+            st.session_state["INTEGRATE_WS_SESSION_KEY"],
+        )
+    else:
+        st.warning("No previous session found or session expired. Logging in...")
+        conn = ConnectToIntegrate()
         conn.login(api_token=api_token, api_secret=api_secret)
         uid, actid, api_session_key, ws_session_key = conn.get_session_keys()
-        update_env_session_keys(uid, actid, api_session_key, ws_session_key)
-        st.info("Session created and keys saved.")
+        update_session_state(uid, actid, api_session_key, ws_session_key)
+        st.info("Session created and keys saved in memory.")
 
     if st.button("Force Refresh Session"):
         conn.login(api_token=api_token, api_secret=api_secret)
         uid, actid, api_session_key, ws_session_key = conn.get_session_keys()
-        update_env_session_keys(uid, actid, api_session_key, ws_session_key)
+        update_session_state(uid, actid, api_session_key, ws_session_key)
         st.success("Session forcibly refreshed!")
-    
-    st.info(f"Current session key: {os.environ.get('INTEGRATE_API_SESSION_KEY','')[:8]}... (hidden for security)")
-    st.caption(f"Actid: {os.environ.get('INTEGRATE_ACTID','')}")
+
+    st.info(f"Current session key: {str(st.session_state.get('INTEGRATE_API_SESSION_KEY',''))[:8]}... (hidden for security)")
+    st.caption(f"Actid: {str(st.session_state.get('INTEGRATE_ACTID',''))}")
