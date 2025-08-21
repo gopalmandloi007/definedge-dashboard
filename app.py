@@ -1,6 +1,5 @@
 import streamlit as st
 import importlib
-import login_handler  # 👈 new file we create
 
 # Set page config ONCE at the top
 st.set_page_config(page_title="Gopal Mandloi_Dashboard", layout="wide")
@@ -27,19 +26,6 @@ PAGES = {
 
 st.title("Gopal Mandloi Integrate Dashboard")
 
-# 🔑 Login check
-st.sidebar.header("Login")
-
-api_session_key = st.session_state.get("integrate_api_session_key")
-if not api_session_key:
-    api_session_key = login_handler.do_login()
-
-# Agar login nahi hua to stop execution
-if not api_session_key:
-    st.warning("Please login to continue.")
-    st.stop()
-
-# ✅ Agar login ho gaya to pages visible
 page = st.sidebar.radio("Go to", list(PAGES.keys()))
 modulename = PAGES[page]
 
