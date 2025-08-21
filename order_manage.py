@@ -9,9 +9,6 @@ def show():
     data = integrate_get("/orders")
     orderlist = data.get("orders", [])
 
-    # Print for debugging (optional, can comment out)
-    # st.write("Order Statuses:", [o.get("order_status", "") for o in orderlist])
-
     # Normalize statuses: replace spaces with underscores and uppercase
     open_statuses = {"OPEN", "PARTIALLY_FILLED"}
     def norm_status(s):
@@ -70,16 +67,46 @@ def show():
         if order:
             st.markdown("---")
             st.subheader(f"Modify Order: {order['tradingsymbol']} ({order['order_id']})")
+
+            # Price type options
+            price_type_options = ["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"]
+            # Normalize order price_type for matching (handle variations)
+            def match_price_type(pt):
+                pt_norm = str(pt).replace("_", "-").replace(" ", "-").upper()
+                for idx, opt in enumerate(price_type_options):
+                    if pt_norm == opt:
+                        return idx
+                # Fallback: try to match ignoring hyphens
+                pt_simple = pt_norm.replace("-", "")
+                for idx, opt in enumerate(price_type_options):
+                    if pt_simple == opt.replace("-", ""):
+                        return idx
+                return 0  # Default to first option
+
+            price_type_idx = match_price_type(order.get("price_type", "LIMIT"))
+
+            product_options = ["CNC", "INTRADAY", "NORMAL"]
+            product_idx = product_options.index(order.get("product_type", "CNC")) if order.get("product_type", "CNC") in product_options else 0
+
+            validity_options = ["DAY", "EOS", "IOC"]
+            validity_idx = validity_options.index(order.get("validity", "DAY")) if order.get("validity", "DAY") in validity_options else 0
+
             with st.form(f"mod_form_{order['order_id']}"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     new_qty = st.number_input("Qty", min_value=1, value=int(order["quantity"]), key=f"qty_{order['order_id']}")
                     new_price = st.number_input("Price", min_value=0.0, value=float(order["price"]), key=f"price_{order['order_id']}")
                 with col2:
-                    new_price_type = st.selectbox("Type", ["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"], index=["LIMIT", "MARKET", "SL-LIMIT", "SL-MARKET"].index(order["price_type"]), key=f"ptype_{order['order_id']}")
-                    new_product = st.selectbox("Product", ["CNC", "INTRADAY", "NORMAL"], index=["CNC", "INTRADAY", "NORMAL"].index(order["product_type"]), key=f"prod_{order['order_id']}")
+                    new_price_type = st.selectbox(
+                        "Type", price_type_options, index=price_type_idx, key=f"ptype_{order['order_id']}"
+                    )
+                    new_product = st.selectbox(
+                        "Product", product_options, index=product_idx, key=f"prod_{order['order_id']}"
+                    )
                 with col3:
-                    new_validity = st.selectbox("Validity", ["DAY", "EOS", "IOC"], index=["DAY", "EOS", "IOC"].index(order["validity"]), key=f"val_{order['order_id']}")
+                    new_validity = st.selectbox(
+                        "Validity", validity_options, index=validity_idx, key=f"val_{order['order_id']}"
+                    )
                 submit = st.form_submit_button("✓ Confirm")
                 cancel = st.form_submit_button("✗ Cancel")
                 if submit:
