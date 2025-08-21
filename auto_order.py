@@ -33,19 +33,9 @@ def is_duplicate_order(symbol, exchange, order_type, price, qty, price_type, ord
             return True
     return False
 
-def get_row_state(unique_id, default=False):
-    if "selected_stocks" not in st.session_state:
-        st.session_state["selected_stocks"] = {}
-    return st.session_state["selected_stocks"].get(unique_id, default)
-
-def set_row_state(unique_id, value):
-    if "selected_stocks" not in st.session_state:
-        st.session_state["selected_stocks"] = {}
-    st.session_state["selected_stocks"][unique_id] = value
-
-def set_all_selection(val=True):
-    for k in st.session_state.get("row_ids", []):
-        set_row_state(k, val)
+def set_all_selection(row_ids, val=True):
+    for k in row_ids:
+        st.session_state[f"select_{k}"] = val
 
 def order_row(symbol, entry_price, qty, exchange, product_type, tick_size, price_precision, orders, unique_id, allow_manual_entry=False):
     default_sl_pct = 2.0
@@ -57,7 +47,7 @@ def order_row(symbol, entry_price, qty, exchange, product_type, tick_size, price
     row_state = {}
 
     # Selection tick
-    row_state["selected"] = st.checkbox("", value=get_row_state(unique_id), key=f"select_{unique_id}")
+    row_state["selected"] = st.checkbox("", value=st.session_state.get(f"select_{unique_id}", False), key=f"select_{unique_id}")
 
     # Stock Name
     st.markdown(f"<b>{symbol}</b>", unsafe_allow_html=True)
@@ -200,12 +190,6 @@ def show():
     st.markdown("#### All orders in one row. <span style='color:red'><b>SL %</b></span> <span style='color:green'><b>T1/T2 %</b></span>", unsafe_allow_html=True)
     st.write("")
 
-    # Table header
-    st.write("Use Select All/Deselect All buttons to quickly select/deselect stocks before placing orders.")
-
-    # Prepare row ids for selection management
-    row_ids = []
-
     orders = []
     try:
         order_data = integrate_get("/orders")
@@ -213,15 +197,18 @@ def show():
     except Exception:
         pass
 
+    row_ids = []
     row_states = []
 
+    # Select/Deselect all buttons OUTSIDE the form
+    col_sa, col_da = st.columns([1,1])
+    if col_sa.button("Select All Stocks"):
+        set_all_selection(row_ids, True)
+    if col_da.button("Deselect All Stocks"):
+        set_all_selection(row_ids, False)
+
     with st.form("auto_order_form", clear_on_submit=False):
-        # Select/Deselect all buttons
-        col_sa, col_da = st.columns([1,1])
-        if col_sa.button("Select All Stocks"):
-            set_all_selection(True)
-        if col_da.button("Deselect All Stocks"):
-            set_all_selection(False)
+        st.write("Tick stocks, set details below, then click 'Place All Selected Orders'.")
 
         # POSITIONS first
         pdata = integrate_get("/positions")
@@ -267,9 +254,6 @@ def show():
                     symbol, entry_price, qty, exchange, product_type, tick_size, price_precision, orders, unique_id, allow_manual_entry
                 )
                 row_states.append(state)
-
-        # Save row ids for selection management
-        st.session_state["row_ids"] = row_ids
 
         submitted = st.form_submit_button("Place All Selected Orders")
         if submitted:
