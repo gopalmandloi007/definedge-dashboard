@@ -1,6 +1,17 @@
 import streamlit as st
 from utils import integrate_get, integrate_post
 
+# --- CSS for compact layout ---
+st.markdown("""
+<style>
+.stApp { max-width: 1750px; }
+div[data-testid="column"] { padding-left:3px !important; padding-right:3px !important;}
+label, .stNumberInput label, .stRadio label, .stCheckbox label { font-size:10px !important; }
+.stTextInput input, .stNumberInput input { font-size:12px !important; height:26px !important; padding:2px 2px !important;}
+.stMarkdown, .stMarkdown p { font-size:11px !important; margin:0px !important;}
+</style>
+""", unsafe_allow_html=True)
+
 def snap_to_tick(price, tick_size):
     return round(round(price / tick_size) * tick_size, 2)
 
@@ -46,17 +57,17 @@ def order_row(cols, symbol, entry_price, qty, exchange, product_type, tick_size,
 
     selected = cols[0].checkbox("", value=st.session_state.get(f"select_{unique_id}", False), key=f"select_{unique_id}")
 
-    cols[1].markdown(f"<span style='font-size:13px'><b>{symbol}</b></span>", unsafe_allow_html=True)
+    cols[1].markdown(f"<span style='font-size:11px'><b>{symbol}</b></span>", unsafe_allow_html=True)
     if allow_manual_entry:
         entry_price = cols[2].number_input(
             f"Entry {symbol}", min_value=0.01, value=0.0, format=f"%.{price_precision}f", key=f"entry_{unique_id}", label_visibility="hidden"
         )
         if entry_price == 0.0:
-            cols[2].markdown(f"<span style='color:red;font-size:11px'>Entry Price!</span>", unsafe_allow_html=True)
+            cols[2].markdown(f"<span style='color:red;font-size:10px'>Req!</span>", unsafe_allow_html=True)
     else:
-        cols[2].markdown(f"<span style='font-size:13px'>₹{entry_price:.{price_precision}f}</span>", unsafe_allow_html=True)
+        cols[2].markdown(f"<span style='font-size:11px'>₹{entry_price:.{price_precision}f}</span>", unsafe_allow_html=True)
 
-    qty_display = cols[3].markdown(f"<span style='font-size:13px'>{qty}</span>", unsafe_allow_html=True)
+    cols[3].markdown(f"<span style='font-size:11px'>{qty}</span>", unsafe_allow_html=True)
 
     sl_pct = cols[4].number_input(
         f"SL% {symbol}", min_value=0.5, max_value=50.0, value=default_sl_pct, format="%.2f", key=f"sl_pct_{unique_id}", label_visibility="hidden"
@@ -69,7 +80,7 @@ def order_row(cols, symbol, entry_price, qty, exchange, product_type, tick_size,
     )
     sl_trigger_price = snap_to_tick(entry_price * (1 - sl_pct / 100), tick_size)
     sl_limit_price   = snap_to_tick(entry_price * (1 - (sl_pct + 0.2) / 100), tick_size)
-    cols[4].markdown(f'<span style="color:red;font-size:11px;">{sl_pct:.2f}%<br>({sl_trigger_price:.{price_precision}f}/{sl_limit_price:.{price_precision}f})</span>', unsafe_allow_html=True)
+    cols[4].markdown(f'<span style="color:red;font-size:10px;">{sl_pct:.2f}%<br>({sl_trigger_price:.{price_precision}f}/{sl_limit_price:.{price_precision}f})</span>', unsafe_allow_html=True)
 
     t1_pct = cols[7].number_input(
         f"T1% {symbol}", min_value=1.0, max_value=100.0, value=default_t1_pct, format="%.2f", key=f"t1_pct_{unique_id}", label_visibility="hidden"
@@ -78,7 +89,7 @@ def order_row(cols, symbol, entry_price, qty, exchange, product_type, tick_size,
         f"T1 Qty {symbol}", min_value=1, max_value=qty, value=half_qty, key=f"t1_qty_{unique_id}", label_visibility="hidden"
     )
     t1_price = snap_to_tick(entry_price * (1 + t1_pct / 100), tick_size)
-    cols[7].markdown(f'<span style="color:green;font-size:11px;">{t1_pct:.2f}%<br>({t1_price:.{price_precision}f})</span>', unsafe_allow_html=True)
+    cols[7].markdown(f'<span style="color:green;font-size:10px;">{t1_pct:.2f}%<br>({t1_price:.{price_precision}f})</span>', unsafe_allow_html=True)
 
     t2_pct = cols[9].number_input(
         f"T2% {symbol}", min_value=1.0, max_value=100.0, value=default_t2_pct, format="%.2f", key=f"t2_pct_{unique_id}", label_visibility="hidden"
@@ -87,7 +98,7 @@ def order_row(cols, symbol, entry_price, qty, exchange, product_type, tick_size,
         f"T2 Qty {symbol}", min_value=1, max_value=qty, value=rem_qty, key=f"t2_qty_{unique_id}", label_visibility="hidden"
     )
     t2_price = snap_to_tick(entry_price * (1 + t2_pct / 100), tick_size)
-    cols[9].markdown(f'<span style="color:green;font-size:11px;">{t2_pct:.2f}%<br>({t2_price:.{price_precision}f})</span>', unsafe_allow_html=True)
+    cols[9].markdown(f'<span style="color:green;font-size:10px;">{t2_pct:.2f}%<br>({t2_price:.{price_precision}f})</span>', unsafe_allow_html=True)
 
     amo = cols[11].checkbox("", value=st.session_state.get(f"amo_{unique_id}", False), key=f"amo_{unique_id}")
     remark = "Auto Order"
@@ -184,16 +195,8 @@ def place_order(state):
     return resp
 
 def show():
-    st.markdown("""
-    <style>
-    .stApp { max-width: 1700px; }
-    .stNumberInput label, .stRadio label, .stCheckbox label { font-size:11px !important; }
-    div[data-testid="column"] { padding-left:2px !important; padding-right:2px !important;}
-    </style>
-    """, unsafe_allow_html=True)
     st.title("Holdings / Positions")
-    st.markdown("All orders in one row. <span style='color:red'><b>SL %</b></span> <span style='color:green'><b>T1/T2 %</b></span>", unsafe_allow_html=True)
-    st.write("Use Select All/Deselect All buttons to quickly select/deselect stocks before placing orders.")
+    st.markdown("All orders in one row. <span style='color:red'><b>SL%</b></span> <span style='color:green'><b>T1/T2%</b></span>", unsafe_allow_html=True)
 
     orders = []
     try:
@@ -209,13 +212,10 @@ def show():
     col_sa, col_da = st.columns([1,1])
     if col_sa.button("Select All Stocks"):
         set_all_selection(st.session_state["row_ids"], True)
-        st.experimental_rerun()
     if col_da.button("Deselect All Stocks"):
         set_all_selection(st.session_state["row_ids"], False)
-        st.experimental_rerun()
 
     with st.form("auto_order_form", clear_on_submit=False):
-        # Table header as columns
         hdr = st.columns([0.6, 1.2, 0.9, 0.8, 1.0, 0.8, 1.0, 0.8, 1.0, 0.8, 0.8, 0.7, 1.1, 1.2])
         hdr[0].markdown("**Sel**")
         hdr[1].markdown("**Stock**")
@@ -300,7 +300,8 @@ def show():
                         st.error(f"{state['symbol']}: T2 order failed: {resp['t2'].get('message', resp['t2'])}")
                     elif resp.get('t2'):
                         st.success(f"{state['symbol']}: T2 {state['t2_price']}({state['t2_pct']}%) Qty: {state['t2_qty']} → {resp['t2'].get('message', resp['t2'])}")
-            st.rerun()
+            st.session_state["row_ids"] = row_ids
+            st.experimental_rerun()
 
 if __name__ == "__main__":
     show()
