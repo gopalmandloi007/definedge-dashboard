@@ -17,6 +17,7 @@ PAGES = {
     "GTT order manage": "gtt",
     "GTT Order Place": "gtt_oco_manage",
     "Square Off": "squareoff",
+    "Auto Order (SL & Targets)": "auto_order",
     "Symbol Technical Details": "symbol_technical_details",
     "Batch Symbol Scanner": "definedge_batch_scan",
     "Candlestick Demo": "simple_chart_demo",
