@@ -12,8 +12,7 @@ def extract_first_valid(d, keys, default=""):
             return v
     return default
 
-def extract_qty(holding, ts_info):
-    # Try dp_qty first, then t1_qty
+def extract_qty(holding):
     qty = int(float(holding.get("dp_qty", "0") or 0))
     if qty == 0:
         qty = int(float(holding.get("t1_qty", "0") or 0))
@@ -87,12 +86,13 @@ def order_row(symbol, entry_price, qty, exchange, product_type, tick_size, price
     cols[7].markdown(f'<span style="color:green;"><b>{t2_pct:.2f}%</b></span>', unsafe_allow_html=True)
 
     # Calculate prices, snapped to tick
-    sl_price = snap_to_tick(entry_price * (1 - sl_pct / 100), tick_size)
+    sl_trigger_price = snap_to_tick(entry_price * (1 - sl_pct / 100), tick_size)
+    sl_limit_price   = snap_to_tick(entry_price * (1 - (sl_pct + 0.2) / 100), tick_size)
     t1_price = snap_to_tick(entry_price * (1 + t1_pct / 100), tick_size)
     t2_price = snap_to_tick(entry_price * (1 + t2_pct / 100), tick_size)
     validity = "DAY"
 
-    dup_sl = is_duplicate_order(symbol, exchange, "SELL", sl_price, sl_qty, "SL-LIMIT" if not amo else "SL-MARKET", orders)
+    dup_sl = is_duplicate_order(symbol, exchange, "SELL", sl_limit_price, sl_qty, "SL-LIMIT" if not amo else "SL-MARKET", orders)
     dup_t1 = is_duplicate_order(symbol, exchange, "SELL", t1_price, t1_qty, "LIMIT", orders)
     dup_t2 = is_duplicate_order(symbol, exchange, "SELL", t2_price, t2_qty, "LIMIT", orders)
 
@@ -110,7 +110,7 @@ def order_row(symbol, entry_price, qty, exchange, product_type, tick_size, price
         st.warning("Some orders already in OPEN state. Avoiding duplicate orders.")
         submit = False
 
-    return submit, sl_pct, sl_qty, sl_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo, remark, entry_price
+    return submit, sl_pct, sl_qty, sl_trigger_price, sl_limit_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo, remark, entry_price
 
 def show():
     st.title("🚀 Auto Order (% Based SL & Target) for Holdings / Positions")
@@ -136,6 +136,7 @@ def show():
     hdr[10].markdown("**Remark**")
     hdr[11].markdown("**Action**")
 
+    # Get current open orders
     orders = []
     try:
         order_data = integrate_get("/orders")
@@ -143,12 +144,9 @@ def show():
     except Exception:
         pass
 
-    hdata = integrate_get("/holdings")
-    holdings = hdata.get("data", [])
+    # POSITIONS first
     pdata = integrate_get("/positions")
     positions = pdata.get("positions") or pdata.get("data") or []
-
-    # Show positions first
     for p in positions:
         symbol = extract_first_valid(p, ["tradingsymbol", "symbol"])
         qty = int(float(extract_first_valid(p, ["net_quantity", "netqty", "quantity", "Qty"], "0")))
@@ -160,10 +158,9 @@ def show():
         tick_size = float(extract_first_valid(p, ["ticksize"], "0.05"))
         price_precision = int(extract_first_valid(p, ["price_precision"], "2"))
         unique_id = f"P_{symbol}_{exchange}"
-        submit, sl_pct, sl_qty, sl_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo, remark, entry_price = order_row(
+        submit, sl_pct, sl_qty, sl_trigger_price, sl_limit_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo, remark, entry_price = order_row(
             symbol, entry_price, qty, exchange, product_type, tick_size, price_precision, orders, unique_id
         )
-
         if submit:
             sl_price_type = "SL-MARKET" if amo else "SL-LIMIT"
             sl_payload = {
@@ -171,8 +168,8 @@ def show():
                 "tradingsymbol": symbol,
                 "order_type": "SELL",
                 "quantity": str(sl_qty),
-                "price": 0.0 if sl_price_type == "SL-MARKET" else str(sl_price),
-                "trigger_price": str(sl_price),
+                "price": 0.0 if sl_price_type == "SL-MARKET" else str(sl_limit_price),
+                "trigger_price": str(sl_trigger_price),
                 "price_type": sl_price_type,
                 "product_type": product_type,
                 "validity": "DAY",
@@ -205,7 +202,7 @@ def show():
                 t1_payload["amo"] = "Yes"
                 t2_payload["amo"] = "Yes"
             resp = {}
-            if sl_qty > 0 and sl_price > 0:
+            if sl_qty > 0 and sl_limit_price > 0:
                 resp_sl = integrate_post("/placeorder", sl_payload)
                 resp['sl'] = resp_sl
             else:
@@ -219,7 +216,7 @@ def show():
             if resp.get('sl', {}).get("status") == "ERROR":
                 st.error(f"{symbol}: SL order failed: {resp['sl'].get('message', resp['sl'])}")
             else:
-                st.success(f"{symbol}: SL {sl_price}({sl_pct}%) Qty: {sl_qty} → {resp['sl'].get('message', resp['sl'])}")
+                st.success(f"{symbol}: SL Trigger {sl_trigger_price}, Limit {sl_limit_price}({sl_pct}%) Qty: {sl_qty} → {resp['sl'].get('message', resp['sl'])}")
             if resp.get('t1', {}).get("status") == "ERROR":
                 st.error(f"{symbol}: T1 order failed: {resp['t1'].get('message', resp['t1'])}")
             else:
@@ -230,25 +227,28 @@ def show():
                 st.success(f"{symbol}: T2 {t2_price}({t2_pct}%) Qty: {t2_qty} → {resp['t2'].get('message', resp['t2'])}")
             st.rerun()
 
-    # Now show holdings
+    # HOLDINGS (NSE only)
+    hdata = integrate_get("/holdings")
+    holdings = hdata.get("data", [])
     for h in holdings:
         avg_buy_price = float(h.get("avg_buy_price", "0.0"))
+        qty = extract_qty(h)
+        if qty <= 0:
+            continue
         for ts_info in h.get("tradingsymbol", []):
+            if ts_info.get("exchange") != "NSE":
+                continue  # Only NSE
             symbol = ts_info.get("tradingsymbol", "")
             exchange = ts_info.get("exchange", "")
-            qty = extract_qty(h, ts_info)
             tick_size = float(ts_info.get("ticksize", "0.05"))
             price_precision = int(ts_info.get("price_precision", "2"))
             product_type = "CNC"
             unique_id = f"H_{symbol}_{exchange}"
             allow_manual_entry = (avg_buy_price == 0.0)
             entry_price = avg_buy_price if avg_buy_price > 0.0 else 0.0
-            if qty <= 0:
-                continue
-            submit, sl_pct, sl_qty, sl_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo, remark, entry_price = order_row(
+            submit, sl_pct, sl_qty, sl_trigger_price, sl_limit_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo, remark, entry_price = order_row(
                 symbol, entry_price, qty, exchange, product_type, tick_size, price_precision, orders, unique_id, allow_manual_entry
             )
-
             if submit:
                 if entry_price == 0.0:
                     st.error(f"{symbol}: Entry price required for order!")
@@ -259,8 +259,8 @@ def show():
                     "tradingsymbol": symbol,
                     "order_type": "SELL",
                     "quantity": str(sl_qty),
-                    "price": 0.0 if sl_price_type == "SL-MARKET" else str(sl_price),
-                    "trigger_price": str(sl_price),
+                    "price": 0.0 if sl_price_type == "SL-MARKET" else str(sl_limit_price),
+                    "trigger_price": str(sl_trigger_price),
                     "price_type": sl_price_type,
                     "product_type": product_type,
                     "validity": "DAY",
@@ -293,7 +293,7 @@ def show():
                     t1_payload["amo"] = "Yes"
                     t2_payload["amo"] = "Yes"
                 resp = {}
-                if sl_qty > 0 and sl_price > 0:
+                if sl_qty > 0 and sl_limit_price > 0:
                     resp_sl = integrate_post("/placeorder", sl_payload)
                     resp['sl'] = resp_sl
                 else:
@@ -307,7 +307,7 @@ def show():
                 if resp.get('sl', {}).get("status") == "ERROR":
                     st.error(f"{symbol}: SL order failed: {resp['sl'].get('message', resp['sl'])}")
                 else:
-                    st.success(f"{symbol}: SL {sl_price}({sl_pct}%) Qty: {sl_qty} → {resp['sl'].get('message', resp['sl'])}")
+                    st.success(f"{symbol}: SL Trigger {sl_trigger_price}, Limit {sl_limit_price}({sl_pct}%) Qty: {sl_qty} → {resp['sl'].get('message', resp['sl'])}")
                 if resp.get('t1', {}).get("status") == "ERROR":
                     st.error(f"{symbol}: T1 order failed: {resp['t1'].get('message', resp['t1'])}")
                 else:
