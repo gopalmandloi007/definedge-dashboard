@@ -7,18 +7,19 @@ API_STEP2 = "https://signin.definedgesecurities.com/auth/realms/debroking/dsbpkc
 def do_login():
     api_token = st.secrets.get("integrate_api_token")
     api_secret = st.secrets.get("integrate_api_secret")
-
-    # Debug: Show token/secret to verify they are loaded (remove after testing)
-    # st.write("Token:", api_token)
-    # st.write("Secret:", api_secret)
+    st.write(f"api_token: {repr(api_token)}")
+    st.write(f"api_secret: {repr(api_secret)}")
 
     if not api_token or not api_secret:
         st.error("Please add integrate_api_token and integrate_api_secret in Streamlit secrets.")
         return None
 
     # Step 1 → Get otp_token
+    url = API_STEP1.format(api_token=api_token)
+    st.write(f"Step 1 URL: {url}")
     try:
-        resp = requests.get(API_STEP1.format(api_token=api_token), headers={"api_secret": api_secret})
+        resp = requests.get(url, headers={"api_secret": api_secret})
+        st.write("Raw response text:", resp.text)
         data = resp.json()
     except Exception as e:
         st.error(f"Network error: {e}")
@@ -40,6 +41,7 @@ def do_login():
         payload = {"otp_token": otp_token, "otp": otp_code}
         try:
             resp2 = requests.post(API_STEP2, json=payload)
+            st.write("Step 2 Raw response:", resp2.text)
             data2 = resp2.json()
         except Exception as e:
             st.error(f"Network error: {e}")
