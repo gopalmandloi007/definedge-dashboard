@@ -4,7 +4,13 @@ import requests
 API_STEP1 = "https://signin.definedgesecurities.com/auth/realms/debroking/dsbpkc/login/{api_token}"
 API_STEP2 = "https://signin.definedgesecurities.com/auth/realms/debroking/dsbpkc/token"
 
-def do_login():
+def do_login(force_otp=False):
+    # Agar session key hai aur force_otp nahi hai, toh direct return karo
+    if not force_otp:
+        api_session_key = st.session_state.get("integrate_api_session_key") or st.secrets.get("integrate_api_session_key")
+        if api_session_key:
+            return api_session_key
+
     api_token = st.secrets.get("integrate_api_token")
     api_secret = st.secrets.get("integrate_api_secret")
 
@@ -34,7 +40,7 @@ def do_login():
             st.error(f"Login Step 2 failed: {data2}")
             return None
 
-        # Save in secrets (runtime only)
+        # Save in session_state (runtime only)
         st.session_state["integrate_api_session_key"] = data2["api_session_key"]
         st.session_state["susertoken"] = data2["susertoken"]
 
