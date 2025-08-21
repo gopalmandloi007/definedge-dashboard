@@ -41,7 +41,7 @@ def get_ltp(tradingsymbol, exchange, api_session_key):
 def show():
     st.markdown("""
     <style>
-    .stApp { max-width: 950px; margin: auto; }
+    .stApp { width: 100vw; max-width: 100vw; margin: 0; padding: 0; }
     .order-box {
         background: #f8fafd;
         border-radius: 10px;
