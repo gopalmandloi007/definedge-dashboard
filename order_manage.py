@@ -46,10 +46,7 @@ def show():
     </style>
     """, unsafe_allow_html=True)
 
-    # Cancel queue for batch cancel
-    if "orders_to_cancel" not in st.session_state:
-        st.session_state["orders_to_cancel"] = []
-
+    # Action buttons for selection/cancel
     col1, col2, col3, col4 = st.columns(4)
     if col1.button("Select All"):
         set_all(True)
@@ -60,30 +57,22 @@ def show():
         if not selected_ids:
             st.warning("No orders selected.")
         else:
-            # Only enqueue if not already started
-            if not st.session_state["orders_to_cancel"]:
-                st.session_state["orders_to_cancel"] = selected_ids
-            # Cancel one at a time per rerun
-            if st.session_state["orders_to_cancel"]:
-                oid = st.session_state["orders_to_cancel"][0]
+            for oid in selected_ids:
                 result = cancel_order(oid)
                 if result.get("status") == "ERROR":
                     st.error(f"Cancel Failed [{oid}]: {result.get('message','Error')}")
                 else:
                     st.success(f"Order {oid} cancelled!")
-                # Remove from queue and rerun
-                st.session_state["orders_to_cancel"].pop(0)
-                st.rerun()
-
+            st.rerun()
     if col4.button("Cancel All"):
-        if open_orders:
-            oid = open_orders[0]["order_id"]
+        for order in open_orders:
+            oid = order["order_id"]
             result = cancel_order(oid)
             if result.get("status") == "ERROR":
                 st.error(f"Cancel Failed [{oid}]: {result.get('message','Error')}")
             else:
                 st.success(f"Order {oid} cancelled!")
-            st.rerun()
+        st.rerun()
 
     # Table columns to show
     cols = [
@@ -95,6 +84,7 @@ def show():
         "Status", "Exch", "Validity", "Modify", "Cancel"
     ]
 
+    # Table header
     columns = st.columns([0.7, 1.3, 1.2, 0.8, 0.7, 1, 0.9, 1, 1.3, 0.8, 0.7, 1.2, 1.1])
     for i, label in enumerate(col_labels):
         columns[i].markdown(f"**{label}**")
@@ -105,11 +95,14 @@ def show():
         selected = order_selection.get(order["order_id"], False)
         columns[0].checkbox("", value=selected, key=f"select_{order['order_id']}")
         order_selection[order["order_id"]] = st.session_state[f"select_{order['order_id']}"]
+        # Show order fields
         for i, key in enumerate(cols):
             columns[i+1].write(order.get(key, ""))
+        # Modify button
         if columns[-2].button("Modify", key=f"mod_btn_{order['order_id']}"):
             st.session_state["modify_id"] = order["order_id"]
             st.rerun()
+        # Cancel button
         if columns[-1].button("Cancel", key=f"cancel_btn_{order['order_id']}"):
             result = cancel_order(order['order_id'])
             if result.get("status") == "ERROR":
