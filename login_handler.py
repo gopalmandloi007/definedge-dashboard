@@ -41,30 +41,26 @@ def do_login():
             st.error(f"Network error: {e}")
             return None
 
-        if "api_session_key" not in data2:
+        # Extract API session key and websocket session key
+        api_session_key = data2.get("api_session_key", "")
+        ws_session_key = data2.get("susertoken", "")
+
+        if not api_session_key or not ws_session_key:
             st.error(f"Login Step 2 failed: {data2}")
             return None
 
-        # Store session keys etc. in session_state
-        st.session_state["integrate_api_session_key"] = data2["api_session_key"]
-        st.session_state["susertoken"] = data2.get("susertoken", "")
-        st.session_state["integrate_ws_session_key"] = data2.get("ws_session_key", "")
-        st.session_state["integrate_uid"] = data2.get("uid", "")
-        st.session_state["integrate_actid"] = data2.get("actid", "")
+        st.session_state["integrate_api_session_key"] = api_session_key
+        st.session_state["integrate_ws_session_key"] = ws_session_key
 
         st.success("Login successful! Copy the keys below and paste into your `.streamlit/secrets.toml` file:")
 
         st.markdown("#### Paste in `.streamlit/secrets.toml` (replace old values):")
         st.code(f'''
-integrate_api_token = "{api_token}"
-integrate_api_secret = "{api_secret}"
-integrate_uid = "{data2.get("uid", "")}"
-integrate_actid = "{data2.get("actid", "")}"
-integrate_api_session_key = "{data2["api_session_key"]}"
-integrate_ws_session_key = "{data2.get("ws_session_key", "")}"
+integrate_api_session_key = "{api_session_key}"
+integrate_ws_session_key = "{ws_session_key}"
 ''', language="toml")
         st.markdown("> **Note:** These keys are valid for ~24 hours. Update them again after expiry.")
 
-        return data2["api_session_key"]
+        return api_session_key
 
     return None
