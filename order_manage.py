@@ -63,7 +63,7 @@ def show():
                     st.error(f"Cancel Failed [{oid}]: {result.get('message','Error')}")
                 else:
                     st.success(f"Order {oid} cancelled!")
-            st.experimental_rerun()
+            st.rerun()
     if col4.button("Cancel All"):
         for order in open_orders:
             oid = order["order_id"]
@@ -72,7 +72,7 @@ def show():
                 st.error(f"Cancel Failed [{oid}]: {result.get('message','Error')}")
             else:
                 st.success(f"Order {oid} cancelled!")
-        st.experimental_rerun()
+        st.rerun()
 
     # Table columns to show
     cols = [
@@ -101,7 +101,7 @@ def show():
         # Modify button
         if columns[-2].button("Modify", key=f"mod_btn_{order['order_id']}"):
             st.session_state["modify_id"] = order["order_id"]
-            st.experimental_rerun()
+            st.rerun()
         # Cancel button
         if columns[-1].button("Cancel", key=f"cancel_btn_{order['order_id']}"):
             result = cancel_order(order['order_id'])
@@ -109,7 +109,7 @@ def show():
                 st.error(f"Cancel Failed: {result.get('message','Error')}")
             else:
                 st.success("Order cancelled!")
-            st.experimental_rerun()
+            st.rerun()
 
     # Show full-width modify form below table if any
     modify_id = st.session_state.get("modify_id", None)
@@ -170,10 +170,10 @@ def show():
                     else:
                         st.success("Order modification submitted!")
                     st.session_state["modify_id"] = None
-                    st.experimental_rerun()
+                    st.rerun()
                 if cancel:
                     st.session_state["modify_id"] = None
-                    st.experimental_rerun()
+                    st.rerun()
 
 if __name__ == "__main__":
     show()
