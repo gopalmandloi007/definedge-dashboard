@@ -1,6 +1,12 @@
 import streamlit as st
 from utils import integrate_get, integrate_post
 
+TICK_SIZE = 0.05  # NSE/BSE equity tick size
+
+def snap_to_tick(price, tick_size=TICK_SIZE):
+    """Snap price to nearest valid tick."""
+    return round(round(price / tick_size) * tick_size, 2)
+
 def extract_first_valid(d, keys, default=""):
     for k in keys:
         v = d.get(k)
@@ -9,7 +15,7 @@ def extract_first_valid(d, keys, default=""):
     return default
 
 def extract_qty(pos):
-    for k in ['netqty', 'net_quantity', 'net_qty', 'quantity', 'Qty']:
+    for k in ['netqty', 'net_quantity', 'net_qty', 'quantity', 'Qty', 'dp_qty']:
         v = pos.get(k)
         if v is not None and v != "":
             try:
@@ -17,6 +23,21 @@ def extract_qty(pos):
             except Exception:
                 continue
     return 0
+
+def get_entry_price(symbol, holdings, positions):
+    # Try positions first, fallback to holdings
+    for p in positions:
+        if extract_first_valid(p, ["tradingsymbol", "symbol"]) == symbol:
+            ep = extract_first_valid(p, ["day_buy_avg", "total_buy_avg"], None)
+            if ep and float(ep) > 0:
+                return float(ep)
+    for h in holdings:
+        ts_info = h.get("tradingsymbol", [{}])[0] if h.get("tradingsymbol", None) else h
+        if ts_info.get("tradingsymbol", "") == symbol:
+            ep = extract_first_valid(ts_info, ["avg_buy_price", "average_price", "buy_avg_price"], None)
+            if ep and float(ep) > 0:
+                return float(ep)
+    return 0.0
 
 def is_duplicate_order(symbol, exchange, order_type, price, qty, price_type, orders):
     """Check if an OPEN or PARTIALLY_FILLED order with same key fields exists."""
@@ -28,7 +49,7 @@ def is_duplicate_order(symbol, exchange, order_type, price, qty, price_type, ord
             o.get("tradingsymbol", "") == symbol and
             o.get("exchange", "") == exchange and
             o.get("order_type", "") == order_type and
-            float(o.get("price", 0)) == float(price) and
+            abs(float(o.get("price", 0)) - float(price)) < 1e-2 and
             int(float(o.get("quantity", 0))) == int(qty) and
             o.get("price_type", "") == price_type
         ):
@@ -89,14 +110,14 @@ def order_row(symbol, entry_price, qty, exchange, product_type, orders, unique_i
     cols[5].markdown(f'<span style="color:green;"><b>{t1_pct:.2f}%</b></span>', unsafe_allow_html=True)
     cols[7].markdown(f'<span style="color:green;"><b>{t2_pct:.2f}%</b></span>', unsafe_allow_html=True)
 
-    # Calculate prices
-    sl_price = round(entry_price * (1 - sl_pct / 100), 2)
-    t1_price = round(entry_price * (1 + t1_pct / 100), 2)
-    t2_price = round(entry_price * (1 + t2_pct / 100), 2)
+    # Calculate prices, snapped to tick
+    sl_price = snap_to_tick(entry_price * (1 - sl_pct / 100))
+    t1_price = snap_to_tick(entry_price * (1 + t1_pct / 100))
+    t2_price = snap_to_tick(entry_price * (1 + t2_pct / 100))
     validity = "DAY"
 
     # Indicate duplicate orders for each type
-    dup_sl = is_duplicate_order(symbol, exchange, "SELL", sl_price, sl_qty, "SL-LIMIT", orders)
+    dup_sl = is_duplicate_order(symbol, exchange, "SELL", sl_price, sl_qty, "SL-LIMIT" if not amo else "SL-MARKET", orders)
     dup_t1 = is_duplicate_order(symbol, exchange, "SELL", t1_price, t1_qty, "LIMIT", orders)
     dup_t2 = is_duplicate_order(symbol, exchange, "SELL", t2_price, t2_qty, "LIMIT", orders)
 
@@ -149,129 +170,117 @@ def show():
     except Exception:
         pass
 
-    # Holdings
+    # Load all positions and holdings
     hdata = integrate_get("/holdings")
     holdings = hdata.get("data", [])
-    for h in holdings:
-        qty = int(float(h.get("dp_qty", 0) or 0))
-        tradingsymbols = h.get("tradingsymbol", [])
-        if qty > 0 and tradingsymbols and isinstance(tradingsymbols, list):
-            ts_info = tradingsymbols[0]
-            symbol = ts_info['tradingsymbol']
-            entry_price = float(extract_first_valid(ts_info, ["avg_buy_price", "average_price", "buy_avg_price"], 0))
-            exchange = ts_info['exchange']
-            product_type = "CNC"
-            unique_id = f"H_{symbol}_{exchange}"
-
-            submit, sl_pct, sl_qty, sl_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo = order_row(
-                symbol, entry_price, qty, exchange, product_type, orders, unique_id
-            )
-
-            if submit:
-                sl_payload = {
-                    "exchange": exchange,
-                    "tradingsymbol": symbol,
-                    "order_type": "SELL",
-                    "quantity": str(sl_qty),
-                    "price": str(sl_price),
-                    "price_type": "SL-LIMIT",
-                    "product_type": product_type,
-                    "validity": "DAY",
-                }
-                t1_payload = {
-                    "exchange": exchange,
-                    "tradingsymbol": symbol,
-                    "order_type": "SELL",
-                    "quantity": str(t1_qty),
-                    "price": str(t1_price),
-                    "price_type": "LIMIT",
-                    "product_type": product_type,
-                    "validity": "DAY",
-                }
-                t2_payload = {
-                    "exchange": exchange,
-                    "tradingsymbol": symbol,
-                    "order_type": "SELL",
-                    "quantity": str(t2_qty),
-                    "price": str(t2_price),
-                    "price_type": "LIMIT",
-                    "product_type": product_type,
-                    "validity": "DAY",
-                }
-                if amo:
-                    sl_payload["amo"] = "Yes"
-                    t1_payload["amo"] = "Yes"
-                    t2_payload["amo"] = "Yes"
-
-                resp_sl = integrate_post("/placeorder", sl_payload)
-                resp_t1 = integrate_post("/placeorder", t1_payload)
-                resp_t2 = integrate_post("/placeorder", t2_payload)
-
-                st.success(f"{symbol}: SL {sl_price}({sl_pct}%) Qty: {sl_qty} → {resp_sl.get('message', resp_sl)}")
-                st.success(f"{symbol}: T1 {t1_price}({t1_pct}%) Qty: {t1_qty} → {resp_t1.get('message', resp_t1)}")
-                st.success(f"{symbol}: T2 {t2_price}({t2_pct}%) Qty: {t2_qty} → {resp_t2.get('message', resp_t2)}")
-                st.rerun()
-
-    # Positions
     pdata = integrate_get("/positions")
     positions = pdata.get("positions") or pdata.get("data") or []
-    for pos in positions:
-        net_qty = extract_qty(pos)
-        if net_qty > 0:
-            symbol = extract_first_valid(pos, ["tradingsymbol", "symbol"])
-            exchange = extract_first_valid(pos, ["exchange"])
-            entry_price = float(extract_first_valid(pos, ["day_buy_avg", "total_buy_avg"], 0))
-            product_type = extract_first_valid(pos, ["product_type", "productType", "Product"], "INTRADAY")
-            unique_id = f"P_{symbol}_{exchange}"
 
-            submit, sl_pct, sl_qty, sl_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo = order_row(
-                symbol, entry_price, net_qty, exchange, product_type, orders, unique_id
-            )
+    # Build symbol list: combine all stocks from positions/holdings
+    symbols_info = {}
+    for p in positions:
+        symbol = extract_first_valid(p, ["tradingsymbol", "symbol"])
+        qty = extract_qty(p)
+        exchange = extract_first_valid(p, ["exchange"])
+        product_type = extract_first_valid(p, ["product_type", "productType", "Product"], "INTRADAY")
+        entry_price = get_entry_price(symbol, holdings, positions)
+        if qty > 0 and entry_price > 0:
+            symbols_info[symbol] = {
+                "symbol": symbol,
+                "qty": qty,
+                "exchange": exchange,
+                "product_type": product_type,
+                "entry_price": entry_price,
+                "source": "Position"
+            }
+    for h in holdings:
+        ts_info = h.get("tradingsymbol", [{}])[0] if h.get("tradingsymbol", None) else h
+        symbol = ts_info.get("tradingsymbol", "")
+        qty = extract_qty(h)
+        exchange = ts_info.get("exchange", "")
+        product_type = "CNC"
+        entry_price = get_entry_price(symbol, holdings, positions)
+        if qty > 0 and entry_price > 0 and symbol not in symbols_info:
+            symbols_info[symbol] = {
+                "symbol": symbol,
+                "qty": qty,
+                "exchange": exchange,
+                "product_type": product_type,
+                "entry_price": entry_price,
+                "source": "Holding"
+            }
 
-            if submit:
-                sl_payload = {
-                    "exchange": exchange,
-                    "tradingsymbol": symbol,
-                    "order_type": "SELL",
-                    "quantity": str(sl_qty),
-                    "price": str(sl_price),
-                    "price_type": "SL-LIMIT",
-                    "product_type": product_type,
-                    "validity": "DAY",
-                }
-                t1_payload = {
-                    "exchange": exchange,
-                    "tradingsymbol": symbol,
-                    "order_type": "SELL",
-                    "quantity": str(t1_qty),
-                    "price": str(t1_price),
-                    "price_type": "LIMIT",
-                    "product_type": product_type,
-                    "validity": "DAY",
-                }
-                t2_payload = {
-                    "exchange": exchange,
-                    "tradingsymbol": symbol,
-                    "order_type": "SELL",
-                    "quantity": str(t2_qty),
-                    "price": str(t2_price),
-                    "price_type": "LIMIT",
-                    "product_type": product_type,
-                    "validity": "DAY",
-                }
-                if amo:
-                    sl_payload["amo"] = "Yes"
-                    t1_payload["amo"] = "Yes"
-                    t2_payload["amo"] = "Yes"
+    for symbol, info in symbols_info.items():
+        unique_id = f"{info['source'][0]}_{symbol}_{info['exchange']}"
+        submit, sl_pct, sl_qty, sl_price, t1_pct, t1_qty, t1_price, t2_pct, t2_qty, t2_price, amo = order_row(
+            symbol, info["entry_price"], info["qty"], info["exchange"], info["product_type"], orders, unique_id
+        )
 
+        if submit:
+            # SL-LIMIT not allowed for AMO, so switch to SL-MARKET for AMO
+            sl_price_type = "SL-MARKET" if amo else "SL-LIMIT"
+            sl_payload = {
+                "exchange": info["exchange"],
+                "tradingsymbol": symbol,
+                "order_type": "SELL",
+                "quantity": str(sl_qty),
+                "price": 0.0 if sl_price_type == "SL-MARKET" else str(sl_price),
+                "trigger_price": str(sl_price),
+                "price_type": sl_price_type,
+                "product_type": info["product_type"],
+                "validity": "DAY",
+            }
+            t1_payload = {
+                "exchange": info["exchange"],
+                "tradingsymbol": symbol,
+                "order_type": "SELL",
+                "quantity": str(t1_qty),
+                "price": str(t1_price),
+                "price_type": "LIMIT",
+                "product_type": info["product_type"],
+                "validity": "DAY",
+            }
+            t2_payload = {
+                "exchange": info["exchange"],
+                "tradingsymbol": symbol,
+                "order_type": "SELL",
+                "quantity": str(t2_qty),
+                "price": str(t2_price),
+                "price_type": "LIMIT",
+                "product_type": info["product_type"],
+                "validity": "DAY",
+            }
+            if amo:
+                sl_payload["amo"] = "Yes"
+                t1_payload["amo"] = "Yes"
+                t2_payload["amo"] = "Yes"
+            # Place orders
+            resp = {}
+            if sl_qty > 0 and sl_price > 0:
                 resp_sl = integrate_post("/placeorder", sl_payload)
+                resp['sl'] = resp_sl
+            else:
+                resp['sl'] = {"status": "ERROR", "message": "SL price or qty invalid"}
+            if t1_qty > 0 and t1_price > 0:
                 resp_t1 = integrate_post("/placeorder", t1_payload)
+                resp['t1'] = resp_t1
+            if t2_qty > 0 and t2_price > 0:
                 resp_t2 = integrate_post("/placeorder", t2_payload)
-
-                st.success(f"{symbol}: SL {sl_price}({sl_pct}%) Qty: {sl_qty} → {resp_sl.get('message', resp_sl)}")
-                st.success(f"{symbol}: T1 {t1_price}({t1_pct}%) Qty: {t1_qty} → {resp_t1.get('message', resp_t1)}")
-                st.success(f"{symbol}: T2 {t2_price}({t2_pct}%) Qty: {t2_qty} → {resp_t2.get('message', resp_t2)}")
-                st.rerun()
+                resp['t2'] = resp_t2
+            # Show result
+            if resp.get('sl', {}).get("status") == "ERROR":
+                st.error(f"{symbol}: SL order failed: {resp['sl'].get('message', resp['sl'])}")
+            else:
+                st.success(f"{symbol}: SL {sl_price}({sl_pct}%) Qty: {sl_qty} → {resp['sl'].get('message', resp['sl'])}")
+            if resp.get('t1', {}).get("status") == "ERROR":
+                st.error(f"{symbol}: T1 order failed: {resp['t1'].get('message', resp['t1'])}")
+            else:
+                st.success(f"{symbol}: T1 {t1_price}({t1_pct}%) Qty: {t1_qty} → {resp['t1'].get('message', resp['t1'])}")
+            if resp.get('t2', {}).get("status") == "ERROR":
+                st.error(f"{symbol}: T2 order failed: {resp['t2'].get('message', resp['t2'])}")
+            else:
+                st.success(f"{symbol}: T2 {t2_price}({t2_pct}%) Qty: {t2_qty} → {resp['t2'].get('message', resp['t2'])}")
+            st.rerun()
 
 if __name__ == "__main__":
     show()
