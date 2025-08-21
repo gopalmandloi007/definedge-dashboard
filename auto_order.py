@@ -1,15 +1,15 @@
 import streamlit as st
 from utils import integrate_get, integrate_post
 
-# --- Ultra-compact CSS ---
+# --- Medium compact CSS ---
 st.markdown("""
 <style>
 .stApp { max-width: 1750px; }
-div[data-testid="column"] { padding-left:2px !important; padding-right:2px !important;}
-label, .stNumberInput label, .stRadio label, .stCheckbox label { font-size:10px !important; margin:0px !important; }
-.stNumberInput input, .stTextInput input { font-size:10px !important; height:18px !important; padding:1px 2px !important; min-width:28px !important; max-width:46px !important;}
-[data-testid="stRadio"], [data-testid="stCheckbox"] label { font-size:10px !important; }
-.stMarkdown, .stMarkdown p { font-size:10px !important; margin:0px !important;}
+div[data-testid="column"] { padding-left:4px !important; padding-right:4px !important;}
+label, .stNumberInput label, .stRadio label, .stCheckbox label { font-size:12px !important; margin:0px !important; font-family:Arial, sans-serif; }
+.stNumberInput input, .stTextInput input { font-size:12px !important; height:26px !important; padding:2px 4px !important; min-width:40px !important; max-width:60px !important;}
+[data-testid="stRadio"], [data-testid="stCheckbox"] label { font-size:11px !important; font-family:Arial, sans-serif; }
+.stMarkdown, .stMarkdown p { font-size:11px !important; margin:0px !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -58,18 +58,18 @@ def order_row(cols, symbol, entry_price, qty, exchange, product_type, tick_size,
 
     selected = cols[0].checkbox("", value=st.session_state.get(f"select_{unique_id}", False), key=f"select_{unique_id}")
     # Stock name
-    cols[1].markdown(f"<span style='font-size:10px'><b>{symbol}</b></span>", unsafe_allow_html=True)
+    cols[1].markdown(f"<span style='font-size:12px'><b>{symbol}</b></span>", unsafe_allow_html=True)
     # Entry
     if allow_manual_entry:
         entry_price = cols[2].number_input(
             "", min_value=0.01, value=0.0, format=f"%.{price_precision}f", key=f"entry_{unique_id}", label_visibility="hidden"
         )
         if entry_price == 0.0:
-            cols[2].markdown(f"<span style='color:red;font-size:9px'>Req!</span>", unsafe_allow_html=True)
+            cols[2].markdown(f"<span style='color:red;font-size:11px'>Req!</span>", unsafe_allow_html=True)
     else:
-        cols[2].markdown(f"<span style='font-size:10px'>₹{entry_price:.{price_precision}f}</span>", unsafe_allow_html=True)
+        cols[2].markdown(f"<span style='font-size:12px'>₹{entry_price:.{price_precision}f}</span>", unsafe_allow_html=True)
     # Qty
-    cols[3].markdown(f"<span style='font-size:10px'>{qty}</span>", unsafe_allow_html=True)
+    cols[3].markdown(f"<span style='font-size:12px'>{qty}</span>", unsafe_allow_html=True)
 
     # SL %
     sl_pct = cols[4].number_input(
@@ -84,7 +84,7 @@ def order_row(cols, symbol, entry_price, qty, exchange, product_type, tick_size,
     sl_trigger_price = snap_to_tick(entry_price * (1 - sl_pct / 100), tick_size)
     sl_limit_price   = snap_to_tick(entry_price * (1 - (sl_pct + 0.2) / 100), tick_size)
     cols[4].markdown(
-        f'<span style="color:red;font-size:10px;">{sl_pct:.2f}%<br>({sl_trigger_price:.{price_precision}f}/{sl_limit_price:.{price_precision}f})</span>',
+        f'<span style="color:red;font-size:11px;">{sl_pct:.2f}%<br>({sl_trigger_price:.{price_precision}f}/{sl_limit_price:.{price_precision}f})</span>',
         unsafe_allow_html=True
     )
 
@@ -97,7 +97,7 @@ def order_row(cols, symbol, entry_price, qty, exchange, product_type, tick_size,
     )
     t1_price = snap_to_tick(entry_price * (1 + t1_pct / 100), tick_size)
     cols[7].markdown(
-        f'<span style="color:green;font-size:10px;">{t1_pct:.2f}%<br>({t1_price:.{price_precision}f})</span>',
+        f'<span style="color:green;font-size:11px;">{t1_pct:.2f}%<br>({t1_price:.{price_precision}f})</span>',
         unsafe_allow_html=True
     )
 
@@ -110,7 +110,7 @@ def order_row(cols, symbol, entry_price, qty, exchange, product_type, tick_size,
     )
     t2_price = snap_to_tick(entry_price * (1 + t2_pct / 100), tick_size)
     cols[9].markdown(
-        f'<span style="color:green;font-size:10px;">{t2_pct:.2f}%<br>({t2_price:.{price_precision}f})</span>',
+        f'<span style="color:green;font-size:11px;">{t2_pct:.2f}%<br>({t2_price:.{price_precision}f})</span>',
         unsafe_allow_html=True
     )
 
@@ -216,7 +216,6 @@ def show():
     except Exception:
         pass
 
-    # Track row IDs for selection
     if "row_ids" not in st.session_state:
         st.session_state["row_ids"] = []
 
