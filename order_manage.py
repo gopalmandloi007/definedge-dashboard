@@ -65,14 +65,15 @@ def show():
                     st.success(f"Order {oid} cancelled!")
             st.rerun()
     if col4.button("Cancel All"):
-        for order in open_orders:
-            oid = order["order_id"]
+        # Cancel one order at a time to avoid "order not found" errors
+        if open_orders:
+            oid = open_orders[0]["order_id"]
             result = cancel_order(oid)
             if result.get("status") == "ERROR":
                 st.error(f"Cancel Failed [{oid}]: {result.get('message','Error')}")
             else:
                 st.success(f"Order {oid} cancelled!")
-        st.rerun()
+            st.rerun()
 
     # Table columns to show
     cols = [
