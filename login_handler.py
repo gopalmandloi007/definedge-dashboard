@@ -7,19 +7,14 @@ API_STEP2 = "https://signin.definedgesecurities.com/auth/realms/debroking/dsbpkc
 def do_login():
     api_token = st.secrets.get("integrate_api_token")
     api_secret = st.secrets.get("integrate_api_secret")
-    st.write(f"api_token: {repr(api_token)}")
-    st.write(f"api_secret: {repr(api_secret)}")
 
     if not api_token or not api_secret:
         st.error("Please add integrate_api_token and integrate_api_secret in Streamlit secrets.")
         return None
 
     # Step 1 → Get otp_token
-    url = API_STEP1.format(api_token=api_token)
-    st.write(f"Step 1 URL: {url}")
     try:
-        resp = requests.get(url, headers={"api_secret": api_secret})
-        st.write("Raw response text:", resp.text)
+        resp = requests.get(API_STEP1.format(api_token=api_token), headers={"api_secret": api_secret})
         data = resp.json()
     except Exception as e:
         st.error(f"Network error: {e}")
@@ -41,7 +36,6 @@ def do_login():
         payload = {"otp_token": otp_token, "otp": otp_code}
         try:
             resp2 = requests.post(API_STEP2, json=payload)
-            st.write("Step 2 Raw response:", resp2.text)
             data2 = resp2.json()
         except Exception as e:
             st.error(f"Network error: {e}")
@@ -51,13 +45,25 @@ def do_login():
             st.error(f"Login Step 2 failed: {data2}")
             return None
 
+        # Store session keys etc. in session_state
         st.session_state["integrate_api_session_key"] = data2["api_session_key"]
         st.session_state["susertoken"] = data2.get("susertoken", "")
+        st.session_state["integrate_ws_session_key"] = data2.get("ws_session_key", "")
+        st.session_state["integrate_uid"] = data2.get("uid", "")
+        st.session_state["integrate_actid"] = data2.get("actid", "")
 
-        st.success("Login successful! Session key stored in memory.")
-        st.markdown("### Copy this session key and paste in your `.streamlit/secrets.toml` under `integrate_api_session_key`:")
-        st.code(data2["api_session_key"], language="text")
-        st.markdown("> **Note:** You can use this session key for 24 hours in your secrets file.")
+        st.success("Login successful! Copy the keys below and paste into your `.streamlit/secrets.toml` file:")
+
+        st.markdown("#### Paste in `.streamlit/secrets.toml` (replace old values):")
+        st.code(f'''
+integrate_api_token = "{api_token}"
+integrate_api_secret = "{api_secret}"
+integrate_uid = "{data2.get("uid", "")}"
+integrate_actid = "{data2.get("actid", "")}"
+integrate_api_session_key = "{data2["api_session_key"]}"
+integrate_ws_session_key = "{data2.get("ws_session_key", "")}"
+''', language="toml")
+        st.markdown("> **Note:** These keys are valid for ~24 hours. Update them again after expiry.")
 
         return data2["api_session_key"]
 
