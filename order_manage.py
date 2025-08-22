@@ -22,7 +22,7 @@ def show():
     # Fetch orders
     data = integrate_get("/orders")
     orderlist = data.get("orders", [])
-    open_statuses = {"OPEN", "PARTIALLY_FILLED"}
+    open_statuses = {"OPEN", "PARTIALLY_FILLED", "TRIGGER_PENDING"}  # <-- added TRIGGER_PENDING
     open_orders = [o for o in orderlist if norm_status(o.get("order_status", "")) in open_statuses]
 
     if not open_orders:
