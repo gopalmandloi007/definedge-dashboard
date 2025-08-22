@@ -16,13 +16,22 @@ def cancel_order(order_id):
         result = {"status": "ERROR", "message": "Invalid API response"}
     return result
 
+def get_ltp(tradingsymbol, exchange):
+    # Dummy implementation, replace with your actual LTP fetch logic
+    # You may want to cache or batch fetch for performance
+    try:
+        resp = integrate_get(f"/ltp?symbol={tradingsymbol}&exchange={exchange}")
+        return resp.get("ltp", "N/A")
+    except Exception:
+        return "N/A"
+
 def show():
     st.header("Orders Book & Manage")
 
     # Fetch orders
     data = integrate_get("/orders")
     orderlist = data.get("orders", [])
-    open_statuses = {"OPEN", "PARTIALLY_FILLED", "TRIGGER_PENDING"}  # <-- added TRIGGER_PENDING
+    open_statuses = {"OPEN", "PARTIALLY_FILLED", "TRIGGER_PENDING"}
     open_orders = [o for o in orderlist if norm_status(o.get("order_status", "")) in open_statuses]
 
     if not open_orders:
@@ -76,28 +85,40 @@ def show():
 
     # Table columns to show
     cols = [
-        "order_id", "tradingsymbol", "order_type", "quantity", "price_type", "price",
+        "order_id", "tradingsymbol", "order_type", "quantity", 
+        "price_type", "price", "trigger_price", "ltp", 
         "product_type", "order_status", "exchange", "validity"
     ]
     col_labels = [
-        "Select", "Order ID", "Symbol", "Side", "Qty", "Type", "Price", "Product",
-        "Status", "Exch", "Validity", "Modify", "Cancel"
+        "Select", "Order ID", "Symbol", "Side", "Qty", "Type", "Price", 
+        "Trigger Price", "LTP", 
+        "Product", "Status", "Exch", "Validity", "Modify", "Cancel"
     ]
+    # Adjust column widths to fit all fields
+    col_widths = [0.7, 1.3, 1.2, 0.8, 0.7, 1, 0.8, 0.9, 0.9, 0.9, 1, 1.3, 0.8, 0.7, 1.2, 1.1]
 
     # Table header
-    columns = st.columns([0.7, 1.3, 1.2, 0.8, 0.7, 1, 0.9, 1, 1.3, 0.8, 0.7, 1.2, 1.1])
+    columns = st.columns(col_widths)
     for i, label in enumerate(col_labels):
         columns[i].markdown(f"**{label}**")
     # Table rows
     for order in open_orders:
-        columns = st.columns([0.7, 1.3, 1.2, 0.8, 0.7, 1, 0.9, 1, 1.3, 0.8, 0.7, 1.2, 1.1])
+        columns = st.columns(col_widths)
         # Checkbox for selection
         selected = order_selection.get(order["order_id"], False)
         columns[0].checkbox("", value=selected, key=f"select_{order['order_id']}")
         order_selection[order["order_id"]] = st.session_state[f"select_{order['order_id']}"]
         # Show order fields
         for i, key in enumerate(cols):
-            columns[i+1].write(order.get(key, ""))
+            if key == "ltp":
+                ltp_val = order.get("ltp", None)
+                if ltp_val is None:
+                    # Try to get LTP if not present
+                    ltp_val = get_ltp(order.get("tradingsymbol", ""), order.get("exchange", ""))
+                columns[i+1].write(ltp_val)
+            else:
+                value = order.get(key, "N/A")
+                columns[i+1].write(value)
         # Modify button
         if columns[-2].button("Modify", key=f"mod_btn_{order['order_id']}"):
             st.session_state["modify_id"] = order["order_id"]
@@ -139,6 +160,7 @@ def show():
                 with col1:
                     new_qty = st.number_input("Qty", min_value=1, value=int(order["quantity"]), key=f"qty_{order['order_id']}")
                     new_price = st.number_input("Price", min_value=0.0, value=float(order["price"]), key=f"price_{order['order_id']}")
+                    new_trigger_price = st.number_input("Trigger Price", min_value=0.0, value=float(order.get("trigger_price", 0)), key=f"trgprice_{order['order_id']}")
                 with col2:
                     new_price_type = st.selectbox(
                         "Type", price_type_options, index=price_type_idx, key=f"ptype_{order['order_id']}"
@@ -159,6 +181,7 @@ def show():
                         "tradingsymbol": order.get('tradingsymbol', ''),
                         "quantity": str(new_qty),
                         "price": str(new_price),
+                        "trigger_price": str(new_trigger_price),
                         "product_type": new_product,
                         "order_type": order.get('order_type', ''),
                         "price_type": new_price_type,
