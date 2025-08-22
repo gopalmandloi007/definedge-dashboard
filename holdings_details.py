@@ -308,7 +308,7 @@ def show():
             current_value = ""
             pnl = ""
 
-        initial_sl = round(entry * 0.97, 2)
+        initial_sl = round(entry * 0.98, 2)
         status = "Initial SL"
         trailing_sl = initial_sl
         if is_number(ltp) and ltp > 0 and is_number(entry) and entry > 0:
@@ -355,7 +355,7 @@ def show():
         st.warning("No active holdings with quantity > 0.")
         return
 
-    TOTAL_CAPITAL = 650000.0
+    TOTAL_CAPITAL = 1400000.0
     total_invested = df["Invested"].sum()
     cash_in_hand = max(TOTAL_CAPITAL - total_invested, 0)
     allocation_percent = (total_invested / TOTAL_CAPITAL * 100) if TOTAL_CAPITAL else 0
@@ -386,7 +386,7 @@ def show():
     st.subheader("Risk Exposure (Size & Performance)")
     risk_df = df.copy()
     risk_df['Risk Score'] = np.where(
-        risk_df['Open Risk'] > 0, 3,
+        risk_df['Open Risk'] > 0, 2,
         np.where(risk_df['P&L'] < 0, 2, 1)
     )
     risk_df['Performance %'] = np.where(
@@ -428,7 +428,7 @@ def show():
 
     st.info(
         "Trailing Stop Loss logic: "
-        "Initial SL = Entry - 3%. "
+        "Initial SL = Entry - 2%. "
         "If gain >10%, SL moves to Entry (Safe). "
         "If gain >20%, SL = Entry +10% (Good Profit). "
         "If gain >30%, SL = Entry +20% (Excellent Profit)."
