@@ -16,11 +16,12 @@ def cancel_order(order_id):
         result = {"status": "ERROR", "message": "Invalid API response"}
     return result
 
+@st.cache_data(show_spinner=False)
 def get_ltp(tradingsymbol, exchange, api_session_key):
     try:
         url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{tradingsymbol}"
         headers = {"Authorization": api_session_key}
-        resp = requests.get(url, headers=headers, timeout=3)
+        resp = requests.get(url, headers=headers, timeout=2)
         if resp.status_code == 200:
             ltp_val = resp.json().get("ltp", None)
             return float(ltp_val) if ltp_val is not None else "N/A"
@@ -38,7 +39,7 @@ def show():
     open_orders = [o for o in orderlist if norm_status(o.get("order_status", "")) in open_statuses]
 
     if not open_orders:
-        st.info("No open/partial orders found.")
+        st.info("No open/partial/trigger pending orders found.")
         return
 
     # Track selection state — one per order_id
@@ -101,49 +102,8 @@ def show():
 
     api_session_key = st.secrets.get("integrate_api_session_key", "")
 
-    # Cache all LTPs for this render to avoid multiple API calls for same symbol-exchange
-    ltp_cache = {}
-
-    # Table header
-    columns = st.columns(col_widths)
-    for i, label in enumerate(col_labels):
-        columns[i].markdown(f"**{label}**")
-    # Table rows
-    for order in open_orders:
-        columns = st.columns(col_widths)
-        # Checkbox for selection
-        selected = order_selection.get(order["order_id"], False)
-        columns[0].checkbox("", value=selected, key=f"select_{order['order_id']}")
-        order_selection[order["order_id"]] = st.session_state[f"select_{order['order_id']}"]
-        # Show order fields
-        for i, key in enumerate(cols):
-            if key == "ltp":
-                tradingsymbol = order.get("tradingsymbol", "")
-                exchange = order.get("exchange", "")
-                ltp_key = (tradingsymbol, exchange)
-                ltp_val = ltp_cache.get(ltp_key)
-                if ltp_val is None:
-                    ltp_val = get_ltp(tradingsymbol, exchange, api_session_key)
-                    ltp_cache[ltp_key] = ltp_val
-                columns[i+1].write(ltp_val)
-            else:
-                value = order.get(key, "N/A")
-                columns[i+1].write(value)
-        # Modify button
-        if columns[-2].button("Modify", key=f"mod_btn_{order['order_id']}"):
-            st.session_state["modify_id"] = order["order_id"]
-            st.rerun()
-        # Cancel button
-        if columns[-1].button("Cancel", key=f"cancel_btn_{order['order_id']}"):
-            result = cancel_order(order['order_id'])
-            if result.get("status") == "ERROR":
-                st.error(f"Cancel Failed: {result.get('message','Error')}")
-            else:
-                st.success("Order cancelled!")
-            st.rerun()
-
-    # Show full-width modify form below table if any
     modify_id = st.session_state.get("modify_id", None)
+    # If one row is being modified, show only that form (fast UI)
     if modify_id:
         order = next((o for o in open_orders if o["order_id"] == modify_id), None)
         if order:
@@ -182,8 +142,11 @@ def show():
                     new_validity = st.selectbox(
                         "Validity", validity_options, index=validity_idx, key=f"val_{order['order_id']}"
                     )
-                submit = st.form_submit_button("✓ Confirm")
-                cancel = st.form_submit_button("✗ Cancel")
+                colf1, colf2 = st.columns(2)
+                with colf1:
+                    submit = st.form_submit_button("✓ Confirm")
+                with colf2:
+                    cancel = st.form_submit_button("✗ Cancel")
                 if submit:
                     payload = {
                         "exchange": order.get('exchange', ''),
@@ -206,7 +169,43 @@ def show():
                     st.rerun()
                 if cancel:
                     st.session_state["modify_id"] = None
-                    st.rerun()
+                    # No rerun needed, just return
+                    return
+            return  # Only show form, not table
+
+    # Table header
+    columns = st.columns(col_widths)
+    for i, label in enumerate(col_labels):
+        columns[i].markdown(f"**{label}**")
+    # Table rows
+    for order in open_orders:
+        columns = st.columns(col_widths)
+        # Checkbox for selection
+        selected = order_selection.get(order["order_id"], False)
+        columns[0].checkbox("", value=selected, key=f"select_{order['order_id']}")
+        order_selection[order["order_id"]] = st.session_state[f"select_{order['order_id']}"]
+        # Show order fields
+        for i, key in enumerate(cols):
+            if key == "ltp":
+                tradingsymbol = order.get("tradingsymbol", "")
+                exchange = order.get("exchange", "")
+                ltp_val = get_ltp(tradingsymbol, exchange, api_session_key)
+                columns[i+1].write(ltp_val)
+            else:
+                value = order.get(key, "N/A")
+                columns[i+1].write(value)
+        # Modify button
+        if columns[-2].button("Modify", key=f"mod_btn_{order['order_id']}"):
+            st.session_state["modify_id"] = order["order_id"]
+            # Do NOT call st.rerun() here for fast UI
+        # Cancel button
+        if columns[-1].button("Cancel", key=f"cancel_btn_{order['order_id']}"):
+            result = cancel_order(order['order_id'])
+            if result.get("status") == "ERROR":
+                st.error(f"Cancel Failed: {result.get('message','Error')}")
+            else:
+                st.success("Order cancelled!")
+            st.rerun()
 
 if __name__ == "__main__":
     show()
