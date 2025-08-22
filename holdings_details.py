@@ -355,7 +355,7 @@ def show():
         st.warning("No active holdings with quantity > 0.")
         return
 
-    TOTAL_CAPITAL = 1400000.0
+    TOTAL_CAPITAL = 1200000.0
     total_invested = df["Invested"].sum()
     cash_in_hand = max(TOTAL_CAPITAL - total_invested, 0)
     allocation_percent = (total_invested / TOTAL_CAPITAL * 100) if TOTAL_CAPITAL else 0
