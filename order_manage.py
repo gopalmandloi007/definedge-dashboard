@@ -16,14 +16,17 @@ def cancel_order(order_id):
         result = {"status": "ERROR", "message": "Invalid API response"}
     return result
 
-def get_ltp(tradingsymbol, exchange):
-    # Dummy implementation, replace with your actual LTP fetch logic
-    # You may want to cache or batch fetch for performance
+def get_ltp(tradingsymbol, exchange, api_session_key):
     try:
-        resp = integrate_get(f"/ltp?symbol={tradingsymbol}&exchange={exchange}")
-        return resp.get("ltp", "N/A")
+        url = f"https://integrate.definedgesecurities.com/dart/v1/quotes/{exchange}/{tradingsymbol}"
+        headers = {"Authorization": api_session_key}
+        resp = requests.get(url, headers=headers, timeout=3)
+        if resp.status_code == 200:
+            ltp_val = resp.json().get("ltp", None)
+            return float(ltp_val) if ltp_val is not None else "N/A"
     except Exception:
-        return "N/A"
+        pass
+    return "N/A"
 
 def show():
     st.header("Orders Book & Manage")
@@ -94,8 +97,12 @@ def show():
         "Trigger Price", "LTP", 
         "Product", "Status", "Exch", "Validity", "Modify", "Cancel"
     ]
-    # Adjust column widths to fit all fields
     col_widths = [0.7, 1.3, 1.2, 0.8, 0.7, 1, 0.8, 0.9, 0.9, 0.9, 1, 1.3, 0.8, 0.7, 1.2, 1.1]
+
+    api_session_key = st.secrets.get("integrate_api_session_key", "")
+
+    # Cache all LTPs for this render to avoid multiple API calls for same symbol-exchange
+    ltp_cache = {}
 
     # Table header
     columns = st.columns(col_widths)
@@ -111,10 +118,13 @@ def show():
         # Show order fields
         for i, key in enumerate(cols):
             if key == "ltp":
-                ltp_val = order.get("ltp", None)
+                tradingsymbol = order.get("tradingsymbol", "")
+                exchange = order.get("exchange", "")
+                ltp_key = (tradingsymbol, exchange)
+                ltp_val = ltp_cache.get(ltp_key)
                 if ltp_val is None:
-                    # Try to get LTP if not present
-                    ltp_val = get_ltp(order.get("tradingsymbol", ""), order.get("exchange", ""))
+                    ltp_val = get_ltp(tradingsymbol, exchange, api_session_key)
+                    ltp_cache[ltp_key] = ltp_val
                 columns[i+1].write(ltp_val)
             else:
                 value = order.get(key, "N/A")
