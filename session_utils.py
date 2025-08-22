@@ -1,10 +1,21 @@
 import streamlit as st
 from integrate import ConnectToIntegrate, IntegrateOrders
 
+def update_session_keys(conn):
+    """Login and fetch fresh session keys from broker for this machine."""
+    api_token = st.secrets["INTEGRATE_API_TOKEN"]
+    api_secret = st.secrets["INTEGRATE_API_SECRET"]
+    conn.login(api_token=api_token, api_secret=api_secret)
+    uid, actid, api_session_key, ws_session_key = conn.get_session_keys()
+    conn.set_session_keys(uid, actid, api_session_key, ws_session_key)
+    return uid, actid, api_session_key, ws_session_key
+
 def ensure_active_session(conn):
+    """Checks session validity, refreshes if needed."""
     try:
         io = IntegrateOrders(conn)
         test = io.holdings()
+        # If session expired, re-login
         if (
             isinstance(test, dict)
             and str(test.get("status", "")).upper() in ["FAILED", "FAIL", "ERROR"]
@@ -14,11 +25,8 @@ def ensure_active_session(conn):
             raise Exception("Session expired")
         return io
     except Exception:
-        api_token = st.secrets["INTEGRATE_API_TOKEN"]
-        api_secret = st.secrets["INTEGRATE_API_SECRET"]
-        conn.login(api_token=api_token, api_secret=api_secret)
-        uid, actid, api_session_key, ws_session_key = conn.get_session_keys()
-        # Optionally update Streamlit secrets if needed, but usually not required
+        # Always login from THIS app, never copy-paste session keys!
+        uid, actid, api_session_key, ws_session_key = update_session_keys(conn)
         st.info("Session refreshed successfully.")
         return IntegrateOrders(conn)
 
@@ -32,22 +40,14 @@ def show():
 
     conn = ConnectToIntegrate()
     try:
-        uid = st.secrets["INTEGRATE_UID"]
-        actid = st.secrets["INTEGRATE_ACTID"]
-        api_session_key = st.secrets["INTEGRATE_API_SESSION_KEY"]
-        ws_session_key = st.secrets["INTEGRATE_WS_SESSION_KEY"]
-        conn.set_session_keys(uid, actid, api_session_key, ws_session_key)
-    except KeyError:
-        st.warning("No previous session found. Logging in...")
-        conn.login(api_token=api_token, api_secret=api_secret)
-        uid, actid, api_session_key, ws_session_key = conn.get_session_keys()
-        # Optionally update Streamlit secrets if needed, but usually not required
-        st.info("Session created and keys saved.")
+        # Try to get valid session keys by logging in
+        uid, actid, api_session_key, ws_session_key = update_session_keys(conn)
+    except Exception as e:
+        st.error(f"Login failed: {e}")
+        return
 
     if st.button("Force Refresh Session"):
-        conn.login(api_token=api_token, api_secret=api_secret)
-        uid, actid, api_session_key, ws_session_key = conn.get_session_keys()
-        # Optionally update Streamlit secrets if needed, but usually not required
+        uid, actid, api_session_key, ws_session_key = update_session_keys(conn)
         st.success("Session forcibly refreshed!")
     
     st.info(f"Current session key: {api_session_key[:8]}... (hidden for security)")
