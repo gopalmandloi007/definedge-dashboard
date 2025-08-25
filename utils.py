@@ -1,97 +1,64 @@
 import streamlit as st
 import requests
-import pandas as pd
+import os
+from debug_utils import debug_log
 
-BASE_URL = "https://integrate.definedgesecurities.com/dart/v1"
-
-@st.cache_resource(show_spinner=False)
-def get_api_session_key():
-    return st.secrets["integrate_api_session_key"]
-
-def integrate_get(endpoint, params=None):
-    url = BASE_URL + endpoint
-    headers = {"Authorization": get_api_session_key()}
-    try:
-        resp = requests.get(url, headers=headers, params=params, timeout=10)
-        resp.raise_for_status()
-        if "application/json" in resp.headers.get("Content-Type", ""):
-            return resp.json()
-        else:
-            st.error(f"Non-JSON response: {resp.text[:200]}")
-            return {}
-    except Exception as e:
-        st.error(f"GET {url} failed: {e}")
+def get_session_headers():
+    session = st.session_state.get("integrate_session")
+    if not session:
         return {}
+    return {
+        "Authorization": session["api_session_key"],
+        "actid": session["actid"],
+        "uid": session["uid"]
+    }
 
-def integrate_post(endpoint, data=None):
-    url = BASE_URL + endpoint
-    headers = {"Authorization": get_api_session_key(), "Content-Type": "application/json"}
+def integrate_get(path):
+    base_url = "https://integrate.definedgesecurities.com/dart/v1"
+    headers = get_session_headers()
+    url = base_url + path
+    debug_log(f"GET {url} with headers {headers}")
     try:
-        resp = requests.post(url, headers=headers, json=data, timeout=10)
+        resp = requests.get(url, headers=headers, timeout=15)
+        debug_log(f"GET response: {resp.status_code} - {resp.text}")
         resp.raise_for_status()
-        if "application/json" in resp.headers.get("Content-Type", ""):
-            return resp.json()
-        else:
-            st.error(f"Non-JSON response: {resp.text[:200]}")
-            return {}
+        try:
+            data = resp.json()
+            if data.get("status") == "ERROR" and "session" in data.get("message", "").lower():
+                debug_log("Session expired error detected in API response.")
+                st.session_state.pop("integrate_session", None)
+                try:
+                    os.remove("session.json")
+                except Exception:
+                    pass
+            return data
+        except Exception:
+            return {"status": "ERROR", "message": f"Non-JSON response: {resp.text}"}
     except Exception as e:
-        st.error(f"POST {url} failed: {e}")
-        return {}
+        debug_log(f"GET error: {e}")
+        return {"status": "ERROR", "message": str(e)}
 
-def integrate_put(endpoint, data=None):
-    url = BASE_URL + endpoint
-    headers = {"Authorization": get_api_session_key(), "Content-Type": "application/json"}
+def integrate_post(path, payload):
+    base_url = "https://integrate.definedgesecurities.com/dart/v1"
+    headers = get_session_headers()
+    url = base_url + path
+    debug_log(f"POST {url} payload {payload} headers {headers}")
     try:
-        resp = requests.put(url, headers=headers, json=data, timeout=10)
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        debug_log(f"POST response: {resp.status_code} - {resp.text}")
         resp.raise_for_status()
-        if "application/json" in resp.headers.get("Content-Type", ""):
-            return resp.json()
-        else:
-            st.error(f"Non-JSON response: {resp.text[:200]}")
-            return {}
+        try:
+            data = resp.json()
+            if data.get("status") == "ERROR" and "session" in data.get("message", "").lower():
+                debug_log("Session expired error detected in API response.")
+                st.session_state.pop("integrate_session", None)
+                try:
+                    os.remove("session.json")
+                except Exception:
+                    pass
+            return data
+        except Exception:
+            return {"status": "ERROR", "message": f"Non-JSON response: {resp.text}"}
     except Exception as e:
-        st.error(f"PUT {url} failed: {e}")
-        return {}
-
-def integrate_delete(endpoint, params=None):
-    url = BASE_URL + endpoint
-    headers = {"Authorization": get_api_session_key()}
-    try:
-        resp = requests.delete(url, headers=headers, params=params, timeout=10)
-        resp.raise_for_status()
-        if "application/json" in resp.headers.get("Content-Type", ""):
-            return resp.json()
-        else:
-            st.error(f"Non-JSON response: {resp.text[:200]}")
-            return {}
-    except Exception as e:
-        st.error(f"DELETE {url} failed: {e}")
-        return {}
-
-def load_master_symbols(filename="master.csv"):
-    # Read the file, ignore blank lines
-    with open(filename, "r", encoding="utf-8") as f:
-        lines = [line for line in f if line.strip()]
-    records = [line.strip().split("\t") for line in lines]
-    # Ignore rows with fewer than 3 columns (junk rows)
-    records = [row for row in records if len(row) >= 3]
-    # Convert to DataFrame
-    df = pd.DataFrame(records)
-    # Always assign exactly 15 columns, per your sample
-    base_columns = [
-        "segment", "token", "symbol", "symbol_series", "series", "unknown1",
-        "unknown2", "unknown3", "series2", "unknown4", "unknown5", "unknown6",
-        "isin", "unknown7", "company"
-    ]
-    df.columns = base_columns[:df.shape[1]]
-    # Only EQ & BE series, and only NSE/BSE stocks (not derivatives, indices)
-    df = df[df["series"].isin(["EQ", "BE"])]
-    df = df[df["segment"].isin(["NSE", "BSE"])]
-    # Compose the dropdown label as NSE:SYMBOL-SERIES
-    df["dropdown"] = df["segment"] + ":" + df["symbol"] + "-" + df["series"]
-    # Remove duplicates if any
-    df = df.drop_duplicates(subset=["dropdown"])
-    # Sort for better UX
-    df = df.sort_values("dropdown")
-    # Return dropdown and core fields
-    return df[["dropdown", "segment", "symbol", "series", "company"]]
+        debug_log(f"POST error: {e}")
+        return {"status": "ERROR", "message": str(e)}
